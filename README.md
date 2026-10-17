@@ -1,3 +1,5 @@
+**中文** | [English](README.en.md)
+
 # 待办助理 (todo-assistant)
 
 跨会话的旁支任务工作台：把会话里"先不做但别忘"的事记成卡片，之后单独开会话处理。
@@ -246,20 +248,36 @@ cookie 就是浏览器里那份 `dsh-auth-*`（签名密钥在 `~/.dsh/.credenti
 
 ## 安装
 
-源码留在这里，不要放进 `~/.dsh`：
+三种方式，任选一种。都需要在 DSH 里调用 `plugin_manager install_bundle`（需要审批），装完**重启 dsh**。
+
+**1. 从本地目录（开发用）** —— 源码留在这里，不要放进 `~/.dsh`：
 
 ```
 plugin_manager install_bundle  target = <本仓库绝对路径>
 ```
 
-`install_bundle` 需要审批，装完对整个 profile 生效。它要求 PATH 里有 pnpm（本机通过
-`corepack enable pnpm` 提供）。
-
-装完后 profile 里是一个符号链接：
+**2. 从 GitHub 直接装** —— 不用先 clone：
 
 ```
-~/.dsh/profiles/web/node_modules/todo-assistant -> ../../../../Documents/DSH/dsh-plugins/todo-assistant
+plugin_manager install_bundle  target = https://github.com/zangoose335/dsh-todo-assistant.git
 ```
+
+想锁版本就在地址后加 `#<commit>`，例如 `...#77215f3`。
+
+**3. 从 npm（发布后）**：
+
+```
+plugin_manager install_bundle  target = todo-assistant@0.1.0
+```
+
+`install_bundle` 要求 PATH 里有 pnpm（本机通过 `corepack enable pnpm` 提供）。
+方式 1 装完后 profile 里是一个符号链接：
+
+```
+~/.dsh/profiles/web/node_modules/todo-assistant -> <本仓库绝对路径>
+```
+
+不同方式装的是**同一个包名**，切换前先 `remove_bundle` 掉旧的那份。
 
 **必须重启 dsh** 才会加载 host half：linked 包的安装内导入（`zod`、`@deepseek-ai/dsh-storage-domain`）
 依赖启动时建立的 profile 解析表，运行中的进程不会在安装后重建它。之后每次改 host 代码都要重启；
