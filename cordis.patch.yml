@@ -1,0 +1,11 @@
+# todo-assistant profile bundle patch (declared by the `dsh.bundle.patch`
+# manifest field): applied when this package appears in a profile's
+# `dsh.profile.bundles` list.
+#
+# One host row. The browser half is discovered through the package.json
+# `dsh.client` declaration and served at /plugins/todo-assistant/client.js; it is
+# the same package, so it needs no row of its own.
+
+- insert:
+    - id: todo-assistant
+      name: 'todo-assistant'

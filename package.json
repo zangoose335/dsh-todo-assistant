@@ -1,0 +1,61 @@
+{
+  "name": "todo-assistant",
+  "version": "0.1.0",
+  "description": "DSH 插件：跨会话的旁支任务工作台——把会话里「先不做但别忘」的事记成卡片，之后单独开会话处理。A DSH plugin: a cross-session workspace for side tasks found mid-session.",
+  "license": "MIT",
+  "author": "黑桃伍 (https://github.com/zangoose335)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zangoose335/dsh-todo-assistant.git"
+  },
+  "homepage": "https://github.com/zangoose335/dsh-todo-assistant",
+  "bugs": {
+    "url": "https://github.com/zangoose335/dsh-todo-assistant/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "todo",
+    "side-tasks",
+    "context",
+    "cordis"
+  ],
+  "type": "module",
+  "main": "host.js",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "host.js",
+    "domain.js",
+    "api.js",
+    "tool.js",
+    "git.js",
+    "detect.js",
+    "recall.js",
+    "dedupe.js",
+    "marker.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "docs/*.md"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-storage-domain": "^0.2.0-rc.2",
+    "zod": "^4.4.3",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  }
+}
