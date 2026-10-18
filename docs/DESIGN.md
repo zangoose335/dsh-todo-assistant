@@ -174,6 +174,27 @@ commit 由 host 侧写卡时取（`git rev-parse HEAD`），不需要 AI 出力�
 存储用 `ctx.storageDomain`（全局、跨会话、跨重启），单表 `todos`，按 `workspacePath` 过滤。
 
 ```ts
+/** How one brief item is known; never promote inferred/unknown to verified. */
+type BriefBasis = 'requirement' | 'decided' | 'verified' | 'inferred' | 'unknown' | 'superseded'
+
+interface BriefItem {
+  text: string
+  basis: BriefBasis
+  sourceIds?: string[]          // optional existing SourceRef ids; never auto-read history
+  impact?: 'blocking' | 'non-blocking'
+}
+
+/** The card's primary content; paths and sources are fallback leads. */
+interface TaskBrief {
+  goal: string
+  why?: string
+  confirmed?: BriefItem[]       // confirmed facts/decisions; default []
+  constraints?: BriefItem[]     // must-not-violate constraints
+  leads?: BriefItem[]           // files/symbols/docs; auxiliary only
+  nextAction: string            // canonical next step
+  openQuestions?: BriefItem[]   // unresolved gaps; may block execution
+}
+
 interface TodoItem {
   id: string                  // "td_x7k2"（内部主键）
   major?: number              // "3"（第几个会话）
@@ -209,12 +230,15 @@ interface TodoItem {
   }
   touchedFiles: string[]      // 规则匹配用，AI 填；写入时归一化成工作区相对路径
 
-  core: {                     // 主区：todo_read 默认返回
+  core: {                     // 兼容主区；旧客户端仍读取
     symptom?: string          // 现象（缺陷型）
     cause?: string            // 已定位的原因
-    nextStep: string          // 下一步（缺陷型=怎么修；想法型=要验证什么）
+    nextStep: string          // 兼容镜像；规范来源是 brief.nextAction
     intent?: string           // 意图（想法型）
   }
+
+  /** 任务简报；旧卡缺省时由 core/mustRead/park/touchedFiles 只读派生。 */
+  brief?: TaskBrief
 
   mustRead: EvidenceRef[]     // 必读参考，≤3 条，每条 ≤200 字
   park: ParkedRef[]           // 备查区：标记存在，默认不读
@@ -251,6 +275,19 @@ interface Note {
 }
 ```
 
+### 4.1 TaskBrief 持久化与兼容策略
+
+- `brief` 是 optional 字段；当前 `DOMAIN_VERSION` 仍为 `1`，没有新增必填字段或表。
+- `brief.nextAction` 是唯一规范来源；`core.nextStep` 是为旧客户端保留的兼容镜像。正常写入路径必须同步二者。
+- 旧卡没有 `brief` 时，`projectFull`/`todo_read` 从 `core.symptom`、`core.intent`、`core.cause`、`core.nextStep`、`mustRead`、`park`、`touchedFiles` 派生只读 brief；不回写存储。
+- 旧版本 schema 遇到新字段时的行为属于**降级风险**：当前实测的 zod schema 模拟会在读取时 strip `brief`，旧版本写回后该字段会从磁盘消失。因此升级前应备份 `~/.dsh/storages/todo_assistant.json`；不要在旧版本中写回新数据。
+- 当前不做自动迁移。未来若出现不兼容的必填字段/结构变化，必须先提供备份、迁移和回滚方案，再提升 `DOMAIN_VERSION`；不能把“永远不升版本”当作原则。
+- 当前专项验证：`scripts/verify-brief.mjs` 覆盖 version-1 fixture、brief round-trip、旧卡派生、旧 schema strip/写回丢失模拟。
+- 备份/恢复：升级或尝试降级前，停止写入后复制 `~/.dsh/storages/todo_assistant.json`；恢复时关闭 DSH、替换文件、再启动。
+  当前没有自动迁移步骤；若未来提升 `DOMAIN_VERSION`，必须同时提供迁移脚本和回滚到备份的步骤。
+- 降级风险：旧 schema 读取会 strip 未知 `brief`，写回会永久丢失该字段；因此旧版本只能用于只读诊断，
+  不要让旧版本写回新数据。
+
 **关键点**
 
 - `major.minor` 是后加的（M7 之后）：**major = 第几个会话**（同一根会话共用，子会话上溯到根），
@@ -264,7 +301,7 @@ interface Note {
   需要修订时 `patch.request.text` 可覆盖（只用于修复早期捕获）。
 - `park[].label` + `why` 的存在，是为了让开发者和 AI 在**不读正文**的情况下判断要不要读。这是"有备无患"能成立的前提
 - `notes[]` 只追加。轮 6 的补充就是一条 note
-- `todo_write` 的类型区分不做强类型，靠 `status` + 视图（tab）区分；`defect` 要求 `cause`/`nextStep`，`idea` 要求 `intent`、`cause` 可空
+- `todo_write` 的类型区分不做强类型，靠 `status` + 视图（tab）区分；`defect` 要求 `cause` 和下一步（`nextStep` 或 `brief.nextAction`），`idea` 要求 `intent`、`cause` 可空
 
 ---
 
@@ -274,8 +311,13 @@ interface Note {
 
 ### 5.1 `todo_add`
 
-必填：`title`、`kind`、`nextStep`、`touchedFiles`、`mustRead`
-可选：`symptom`、`cause`、`intent`、`park`、`symbols`
+必填：`title`、`kind`、`touchedFiles`、`mustRead`
+可选：`brief`、`nextStep`、`forceCreate`、`symptom`、`cause`、`intent`、`park`、`symbols`
+
+> `brief.nextAction` 是规范下一步。`nextStep` 只作为旧调用兼容镜像：
+> 只给 `brief` 可以建卡；只给 `nextStep` 仍兼容；两者同时给且冲突时以
+> `brief.nextAction` 为准并返回 warning；两者都缺时拒绝，绝不自动编造下一步。
+> 去重命中时先返回候选，模型必须询问开发者；确认新建后才可传 `forceCreate:true`，确认补充则用 `todo_note`。
 
 handler 内校验，超限直接报错让它重写：
 
@@ -287,6 +329,13 @@ handler 内校验，超限直接报错让它重写：
 | `park[].label` | ≤ 30 字 | |
 | `park[].why` | ≤ 60 字 | |
 | `touchedFiles` 为空 | 警告但放行 | 宁可缺，也要能记 |
+| `brief.goal` / `brief.nextAction` | 必填（提供 brief 时） | 简报必须能回答“做什么、从哪开始” |
+| `brief.confirmed` | ≤ 6 条 | |
+| `brief.constraints` / `leads` / `openQuestions` | 各 ≤ 4 条 | |
+| 单条 brief item | ≤ 200 字 | |
+| brief 总长度 | 软 1200 / 硬 1600 | 超软警告；超硬拒绝，不静默截断 |
+| 只有 leads、没有事实/约束/问题 | 拒绝 | 来源路径不能冒充任务说明 |
+| 无 brief、无 mustRead/现象/原因/意图，只有文件/符号/备查 | 拒绝（`todo/brief-required`） | 新任务不能只给来源；无来源的简单旧式卡仍兼容 |
 
 工具描述必须写死：
 
@@ -306,7 +355,8 @@ handler 内校验，超限直接报错让它重写：
 
 ### 5.3 `todo_read(id, part?)`
 
-- 无参 → `core` + `mustRead` 正文 + `park` 的 label/why 列表（不含正文）+ `code` 坐标
+- 无参 → 先 `brief`（goal/why/confirmed/constraints/leads/nextAction/openQuestions），再 `mustRead` 正文 + `park` 的 label/why 列表（不含正文）+ `code` 坐标
+- 旧卡没有 `brief` 时返回只读派生 brief，并带 `briefSource: 'derived'` 与质量 warning
 - `part: 'park:2'` → 该条正文（M3 先给整条指针含 `where`；正文回读属 M6）
 - `part: 'notes'` → note 历史
 
@@ -404,15 +454,19 @@ AI:  [todo_add: 只填本待办相关字段]
 `todo_add` 执行前，在同一 `workspace` 的 `open`/`doing` 卡里计算：
 
 - `touchedFiles` 交集 ≥ 1，且
-- 标题字符相似度 > 阈值
+- 标题字符相似度 ≥ 0.55，**或** `brief.goal` 相似度 ≥ 0.65。
 
-命中则**不创建**，返回"疑似与 #6「xxx」重复，要合并吗"。开发者确认后改为 `todo_note(#6)`。
+`brief.why` 只参与解释，不单独决定重复。若双方都有 goal 且相似度低于 0.2，则即使标题相似也不拦，
+避免“同一文件但目标不同”的合理新卡被误拦。命中时返回候选卡、共享文件、标题/目标相似度和
+`matchReason`，由模型告知开发者并询问：补充已有卡则调用 `todo_note(#6)`，确认新建则重试
+`todo_add(..., forceCreate:true)`。相似度不是合并或取消创建的授权；`forceCreate` 只能在开发者明确确认后使用。
 
 这直接回应"第一眼没看出来导致重复添加"的问题。
 
-> M7 实现说明：标题相似度用字符 bigram 的 Dice 系数（忽略大小写/空白/标点），阈值 0.55；
-> `touchedFiles` 为空的捕获不参与去重（只靠标题误判太多）。命中返回 `status: duplicate` 而不是建卡，
-> 由模型询问开发者，确认后用 `todo_note` 合并。
+> M7 实现说明：标题/目标相似度用字符 bigram 的 Dice 系数（忽略大小写/空白/标点）。
+> `touchedFiles` 为空的捕获不参与去重（只靠文本误判太多）。命中返回 `status: duplicate` 而不是建卡，
+> 由模型询问开发者：确认补充用 `todo_note` 合并，确认新建用 `forceCreate` 继续。T3 已把 brief.goal 纳入辅助信号；
+> why 仅用于解释；相似度不是自动决策。
 
 ### 6.6 D：标记式捕获（`#DB … #/db` / `#MEMO … #/memo`）
 
@@ -629,6 +683,12 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > （host 扫用户消息、跳过代码块、下一次装配注入一次性指令）。
 > 后来补了 `#MEMO` 别名、`major.minor` 编号、`todo_status`、输入框 `#db` 补全、`#` 引用框、
 > 筛选持久化与**工作区通用规则**（`rules` 表 + 新会话种子拼接）。`scripts/verify-domain.mjs` 通过 181/181。
+>
+> **Stage 1 / T1-T4 已完成（T5/Gate 1 未完成）**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
+> `brief.nextAction` 与 `nextStep` 的统一契约、brief 参与的重复检测、version-1 兼容和旧 schema 降级模拟均已实现。
+> 当前 `scripts/verify-domain.mjs` 通过 184/184，`scripts/verify-brief.mjs` 通过 117/117。
+> **Gate 1/T5 尚未通过**：10 个场景还没有真实模型/UI 证据。确定性测试已覆盖无 brief 的路径-only 拒绝、
+> `forceCreate` 确认创建和 `todo_note` 合并，但这不等于 Gate 1 已通过。
 
 > **与文档的已知偏差**（均为记录过的取舍，不是遗漏）：
 > 1. §7 的三路检测信号只实现"触及文件"；符号与 commit **已决定不做**（见 §7 的实现说明）；

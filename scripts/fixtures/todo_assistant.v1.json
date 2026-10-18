@@ -1,0 +1,88 @@
+{
+  "unit": {
+    "name": "todo_assistant",
+    "version": 1
+  },
+  "global": null,
+  "tables": {
+    "todos": {
+      "td_old01": {
+        "id": "td_old01",
+        "major": 1,
+        "minor": 1,
+        "workspace": "/tmp/legacy-repo",
+        "title": "语言列表删除异常",
+        "status": "open",
+        "kind": "defect",
+        "createdAt": 1800000000000,
+        "updatedAt": 1800000000000,
+        "core": {
+          "symptom": "删除最后一种语言时列表异常",
+          "nextStep": "检查删除按钮的启用条件和删除后的反馈调用"
+        },
+        "touchedFiles": [
+          "LanguageListView.swift"
+        ],
+        "code": {
+          "commit": "",
+          "branch": "",
+          "symbols": []
+        },
+        "mustRead": [
+          {
+            "label": "约束",
+            "text": "最后一种语言不允许删除"
+          }
+        ],
+        "park": [
+          {
+            "id": "p1",
+            "label": "操作反馈",
+            "why": "删除被拒绝时当前没有提示"
+          }
+        ],
+        "notes": []
+      },
+      "td_old02": {
+        "id": "td_old02",
+        "major": 1,
+        "minor": 2,
+        "workspace": "/tmp/legacy-repo",
+        "title": "导出 CSV 表头重复",
+        "status": "open",
+        "kind": "defect",
+        "createdAt": 1800000001000,
+        "updatedAt": 1800000001000,
+        "core": {
+          "symptom": "导出的 CSV 第一行重复出现表头",
+          "cause": "header 在写入数据行时被再次输出",
+          "nextStep": "检查 CSV writer 的 header 写出分支",
+          "intent": "导出文件应只包含一行表头"
+        },
+        "touchedFiles": [
+          "src/export/csv.ts"
+        ],
+        "code": {
+          "commit": "c0ffee1234",
+          "branch": "main",
+          "symbols": [
+            {
+              "file": "src/export/csv.ts",
+              "symbol": "writeHeader",
+              "line": 42
+            }
+          ]
+        },
+        "mustRead": [
+          {
+            "label": "现象",
+            "text": "只有多页导出时表头重复"
+          }
+        ],
+        "park": [],
+        "notes": []
+      }
+    },
+    "rules": {}
+  }
+}

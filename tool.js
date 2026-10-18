@@ -10,6 +10,7 @@
  * the offline harness can build the same definition against a real store.
  */
 import { findDuplicate } from './dedupe.js'
+import { BRIEF_BASES, BRIEF_IMPACTS, BRIEF_LIMITS } from './brief.js'
 import { CAPTURE_LIMITS, STATUSES, TodoInputError, assembleCapture, labelOf, mintId, normalizeTouchedPath, projectFull } from './domain.js'
 import { extractTodoBlocks } from './marker.js'
 
@@ -26,7 +27,10 @@ export const TOOL_DESCRIPTION = [
   'Write only what belongs to this todo. Leave out everything about the main task; unrelated findings pollute later work.',
   'This is a form, not a summary: pick fields from what you already know. Do not restate the conversation.',
   'Use only content still visible in your context. If you believe earlier, compacted content matters, ask the developer whether to read it back first — never read it back on your own.',
-  'If an open card in this workspace looks like the same thing (shared touched file plus a similar title), this tool does NOT create a second card: it returns that card instead. Ask the developer whether to merge; on agreement, append the new facts with todo_note.',
+  'Build a compact task brief from what is visible now: goal, why when it adds context, confirmed facts/decisions, constraints, leads, nextAction, and openQuestions. Simple tasks may be only goal + nextAction; do not fill fields mechanically.',
+  'Every brief item must declare its basis: requirement (the developer asked for it), decided (the developer confirmed it), verified (a fact backed by evidence), inferred (your inference), unknown (not confirmed), or superseded (replaced by a later decision). Never write an inference or unknown as a confirmed fact/decision.',
+  'Do not record only a title, next step, and file paths. If the task itself is unclear, ask the developer or put the missing piece in openQuestions with impact=blocking; do not invent details and do not read history to complete the brief.',
+  'Determine intent before writing: if the developer explicitly asks to add/update an existing card, use todo_note on that card instead of todo_add; if they explicitly ask for a new card, use todo_add; if the intent is unclear, ask. If todo_add reports a similar card, tell the developer which card and ask whether to create anyway or append with todo_note. A similarity signal is never permission to merge or cancel the request. Only after explicit confirmation may you retry todo_add with forceCreate=true; never set forceCreate on your own initiative.',
 ].join(' ')
 
 /**
@@ -103,6 +107,21 @@ function requestOf(session, now, store) {
     return { ...latest, ...cap(blocks[block]), block }
   } catch {
     return undefined
+  }
+}
+
+/** One task-brief item accepted from the model. */
+function briefItemSchema(name) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    description: `One ${name} item. Say whether it is a requirement, decided, verified fact, inference, unknown, or superseded.`,
+    properties: {
+      text: { type: 'string', required: true, description: `One item, at most ${BRIEF_LIMITS.itemText} characters; not a summary of the conversation.` },
+      basis: { type: 'string', required: true, enum: BRIEF_BASES, description: 'requirement | decided | verified | inferred | unknown | superseded' },
+      sourceIds: { type: 'array', items: { type: 'string' }, description: 'Optional source refs when they already exist; do not read history to create them.' },
+      impact: { type: 'string', enum: BRIEF_IMPACTS, description: 'blocking only for openQuestions that prevent starting work.' },
+    },
   }
 }
 
@@ -183,8 +202,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
       },
       nextStep: {
         type: 'string',
-        required: true,
-        description: 'How to start: the fix to try (defect), or what to verify first (idea).',
+        description: 'How to start: the fix to try (defect), or what to verify first (idea). Optional when brief.nextAction is supplied; otherwise required. This is the legacy mirror of brief.nextAction.',
       },
       touchedFiles: {
         type: 'array',
@@ -205,6 +223,24 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
             where: whereSchema(false),
           },
         },
+      },
+      brief: {
+        type: 'object',
+        additionalProperties: false,
+        description: 'The task brief: what to solve, why, confirmed facts/decisions, constraints, leads, nextAction, and open questions. Optional for backward compatibility; new captures should include it.',
+        properties: {
+          goal: { type: 'string', required: true, description: `What to solve or implement, at most ${BRIEF_LIMITS.goal} characters.` },
+          why: { type: 'string', description: `Why it matters, at most ${BRIEF_LIMITS.why} characters; omit when it adds nothing.` },
+          confirmed: { type: 'array', description: `At most ${BRIEF_LIMITS.confirmedItems} confirmed facts/decisions.`, items: briefItemSchema('confirmed') },
+          constraints: { type: 'array', description: `At most ${BRIEF_LIMITS.constraintsItems} constraints that must not be violated.`, items: briefItemSchema('constraint') },
+          leads: { type: 'array', description: `At most ${BRIEF_LIMITS.leadsItems} technical leads (files/symbols/docs); leads are not the task brief.`, items: briefItemSchema('lead') },
+          nextAction: { type: 'string', required: true, description: `The first concrete action, at most ${BRIEF_LIMITS.nextAction} characters.` },
+          openQuestions: { type: 'array', description: `At most ${BRIEF_LIMITS.openQuestionsItems} unresolved questions that may affect execution.`, items: briefItemSchema('open question') },
+        },
+      },
+      forceCreate: {
+        type: 'boolean',
+        description: 'Set true only after the developer explicitly confirms creating a new card despite a reported similar card. Never set it on your own initiative.',
       },
       symptom: { type: 'string', description: 'What is observed (defect). One line.' },
       cause: { type: 'string', description: 'What you already know or suspect the cause is (defect).' },
@@ -248,6 +284,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
           workspace: { type: 'string' },
           mustRead: { type: 'integer' },
           park: { type: 'integer' },
+          brief: { type: 'boolean' },
           warnings: { type: 'array', items: { type: 'string' } },
           label: { type: 'string' },
           candidateId: { type: 'string' },
@@ -255,6 +292,10 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
           candidateLabel: { type: 'string' },
           candidateStatus: { type: 'string' },
           similarity: { type: 'number' },
+          titleSimilarity: { type: 'number' },
+          goalSimilarity: { type: 'number' },
+          whySimilarity: { type: 'number' },
+          matchReason: { type: 'string' },
           sharedFiles: { type: 'array', items: { type: 'string' } },
         },
       },
@@ -264,8 +305,8 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
             {
               type: 'text',
               text: [
-                `Not recorded: #${value.candidateLabel ?? value.candidateId}「${value.candidateTitle}」 looks like the same card (title similarity ${value.similarity}; shared file ${value.sharedFiles.join(', ')}).`,
-                'Ask the developer whether to merge into that card; if they agree, append the new facts with todo_note and do not add a second card.',
+                `Not recorded yet: #${value.candidateLabel ?? value.candidateId}「${value.candidateTitle}」 looks like the same card (${value.matchReason ?? 'shared file + similar title'}; similarity ${value.similarity}; shared file ${value.sharedFiles.join(', ')}).`,
+                'This is a similarity signal, not a decision. Tell the developer which card it is and ask whether to (a) append with todo_note or (b) create a new card anyway. Only after they explicitly choose create, call todo_add again with forceCreate=true; append only after they choose merge.',
               ].join('\n'),
             },
           ]
@@ -274,6 +315,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
         const lines = [
           `Recorded #${value.label ?? value.id}「${value.title}」 as a ${value.kind} card in ${place} (${value.mustRead} must-read, ${value.park} parked).`,
         ]
+        if (value.brief === false) lines.push('No task brief was stored; this card uses legacy fields only. New captures should include a brief with goal, nextAction, and the relevant confirmed facts/constraints.')
         for (const warning of value.warnings ?? []) lines.push(`Note: ${warning}`)
         lines.push('The developer can edit or delete it in the right sidebar; no further call is needed.')
         return [{ type: 'text', text: lines.join('\n') }]
@@ -290,13 +332,17 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
 
       // Dedupe on the normalized form the card will store, so a differently
       // written absolute path still matches.
-      const duplicate = findDuplicate(store.all(), {
-        workspace,
-        title: args?.title,
-        touchedFiles: Array.isArray(args?.touchedFiles)
-          ? args.touchedFiles.map((file) => normalizeTouchedPath(file, workspace)).filter(Boolean)
-          : [],
-      })
+      const duplicate = args?.forceCreate === true
+        ? undefined
+        : findDuplicate(store.all(), {
+            workspace,
+            title: args?.title,
+            goal: args?.brief?.goal,
+            why: args?.brief?.why,
+            touchedFiles: Array.isArray(args?.touchedFiles)
+              ? args.touchedFiles.map((file) => normalizeTouchedPath(file, workspace)).filter(Boolean)
+              : [],
+          })
       if (duplicate !== undefined) {
         return {
           status: 'duplicate',
@@ -305,6 +351,10 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
           candidateLabel: labelOf(duplicate.card).label,
           candidateStatus: duplicate.card.status,
           similarity: duplicate.similarity,
+          titleSimilarity: duplicate.titleSimilarity,
+          goalSimilarity: duplicate.goalSimilarity,
+          whySimilarity: duplicate.whySimilarity,
+          matchReason: duplicate.matchReason,
           sharedFiles: duplicate.sharedFiles,
           workspace,
         }
@@ -339,6 +389,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
         workspace: stored.workspace,
         mustRead: stored.mustRead.length,
         park: stored.park.length,
+        brief: stored.brief !== undefined,
         warnings,
       }
     },
@@ -368,7 +419,7 @@ export function createTodoReadTool({ defineTool, store }) {
   return defineTool({
     name: 'todo_read',
     description: [
-      'Read one card: what it is, what to do next, the few must-read facts, the parked references, and the code coordinates it was captured at.',
+      'Read one card: its task brief (goal, why, confirmed facts/decisions, constraints, leads, next action, open questions), then the few must-read facts, parked references, and code coordinates.',
       'Call it when the developer names a card (a short label like #3.2, or the td_ id) or asks you to work on one. Reading costs context, so read the card before the parked references, and only open a parked pointer when its label plus why suggests it is needed.',
       'Parked references are pointers, not content: their bodies are only reachable later through a read-back the developer approves.',
     ].join(' '),
@@ -392,6 +443,9 @@ export function createTodoReadTool({ defineTool, store }) {
           kind: { type: 'string' },
           workspace: { type: 'string' },
           core: { type: 'json' },
+          brief: { type: 'json' },
+          briefSource: { type: 'string' },
+          briefWarnings: { type: 'array', items: { type: 'string' } },
           mustRead: { type: 'json' },
           park: { type: 'json' },
           code: { type: 'json' },
@@ -423,11 +477,31 @@ export function createTodoReadTool({ defineTool, store }) {
         if (value.request !== null && value.request !== undefined) {
           lines.push(`developer request (verbatim):`, value.request.text)
         }
+        const brief = value.brief ?? null
+        if (brief !== null) {
+          lines.push('brief:')
+          if (brief.goal !== undefined && brief.goal !== '') lines.push(`  goal: ${brief.goal}`)
+          if (brief.why !== undefined && brief.why !== '') lines.push(`  why: ${brief.why}`)
+          for (const key of ['confirmed', 'constraints', 'leads', 'openQuestions']) {
+            for (const item of brief[key] ?? []) {
+              const impact = item.impact === 'blocking' ? ' [blocking]' : ''
+              lines.push(`  ${key}[${item.basis}]: ${item.text}${impact}`)
+            }
+          }
+          if (brief.nextAction !== undefined && brief.nextAction !== '') lines.push(`  next action: ${brief.nextAction}`)
+          if (value.briefSource === 'derived') lines.push('  (brief derived from legacy fields; add a stored brief when possible)')
+          for (const warning of value.briefWarnings ?? []) lines.push(`  brief note: ${warning}`)
+        }
         const core = value.core ?? {}
-        if (core.symptom !== undefined) lines.push(`symptom: ${core.symptom}`)
-        if (core.cause !== undefined) lines.push(`cause: ${core.cause}`)
-        if (core.intent !== undefined) lines.push(`intent: ${core.intent}`)
-        lines.push(`next: ${core.nextStep ?? ''}`)
+        if (brief === null) {
+          if (core.symptom !== undefined) lines.push(`symptom: ${core.symptom}`)
+          if (core.cause !== undefined) lines.push(`cause: ${core.cause}`)
+          if (core.intent !== undefined) lines.push(`intent: ${core.intent}`)
+          lines.push(`next: ${core.nextStep ?? ''}`)
+        } else if (value.briefSource === 'derived') {
+          if (core.cause !== undefined) lines.push(`cause (legacy): ${core.cause}`)
+          if (core.intent !== undefined) lines.push(`intent (legacy): ${core.intent}`)
+        }
         for (const [index, item] of (value.mustRead ?? []).entries()) {
           lines.push(`must-read ${index + 1}. ${item.label}: ${item.text}`)
         }
@@ -460,6 +534,9 @@ export function createTodoReadTool({ defineTool, store }) {
           kind: full.kind,
           workspace: full.workspace,
           core: full.core,
+          brief: full.brief,
+          briefSource: full.briefSource,
+          briefWarnings: full.briefWarnings,
           mustRead: full.mustRead,
           park: full.park.map((item) => ({ label: item.label, why: item.why })),
           code: full.code,

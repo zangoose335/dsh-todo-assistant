@@ -141,7 +141,7 @@ window.__ModuleLoader__.load({
 
 为什么值得用
 - 记卡时顺手带上现场：来源会话与轮次、当时的 git commit、触及的文件、你的原话都会存下来，之后不用再问"这是哪来的、当时什么情况"。
-- 读卡是为了省 token：卡上是压缩过的现场（现象/原因/下一步/几条必读），不是整段对话；需要更深的证据时才按需回读某几段原文。
+- 读卡是为了省 token：卡上先是任务简报（目标/已确认事实与决定/约束/下一步），再是必读与来源指针；需要更深的证据时才按需回读某几段原文。
 - 主线不被打断：记下来就走；处理时另开一个干净会话，以卡片开场——上下文从零开始，但信息够用。
 - 不会忘：你之后又改到这张卡涉及的文件，下一步会有一行提醒；建卡时还会和已有卡比对，疑似重复会先问你要不要合并。
 - 规则只写一次：「设置通用规则」里的要求，之后从卡片开的新会话都会自动带上。
@@ -171,6 +171,16 @@ window.__ModuleLoader__.load({
       'action.expand': '展开详情',
       'action.collapse': '收起详情',
       'action.deleteNote': '删除这条补充',
+      'detail.brief': '任务简报',
+      'detail.briefDerived': '由旧字段生成',
+      'detail.briefGoal': '目标',
+      'detail.briefWhy': '背景',
+      'detail.briefConfirmed': '已确认',
+      'detail.briefConstraints': '约束',
+      'detail.briefLeads': '线索',
+      'detail.briefNext': '下一步',
+      'detail.briefOpen': '待确认',
+      'detail.briefWarnings': '简报提示',
       'detail.symptom': '现象',
       'detail.cause': '原因',
       'detail.intent': '意图',
@@ -298,6 +308,16 @@ Keep in mind
       'action.expand': 'Show details',
       'action.collapse': 'Hide details',
       'action.deleteNote': 'Delete this note',
+      'detail.brief': 'Task brief',
+      'detail.briefDerived': 'derived from legacy fields',
+      'detail.briefGoal': 'Goal',
+      'detail.briefWhy': 'Why',
+      'detail.briefConfirmed': 'Confirmed',
+      'detail.briefConstraints': 'Constraints',
+      'detail.briefLeads': 'Leads',
+      'detail.briefNext': 'Next action',
+      'detail.briefOpen': 'Open questions',
+      'detail.briefWarnings': 'Brief warnings',
       'detail.symptom': 'Symptom',
       'detail.cause': 'Cause',
       'detail.intent': 'Intent',
@@ -1773,21 +1793,64 @@ Keep in mind
           const detail = details[row.id]
           if (detail === undefined) return h('div', { className: 'tdash-section' }, t('detail.loading'))
           const blocks = []
+          const brief = detail.brief !== null && typeof detail.brief === 'object' ? detail.brief : null
+          const core = detail.core ?? {}
+          if (brief !== null) {
+            const facts = []
+            const addFact = (label, value) => {
+              if (typeof value === 'string' && value !== '') {
+                facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, label), value))
+              }
+            }
+            addFact(t('detail.briefGoal'), brief.goal)
+            addFact(t('detail.briefWhy'), brief.why)
+            for (const [key, label] of [
+              ['confirmed', 'detail.briefConfirmed'],
+              ['constraints', 'detail.briefConstraints'],
+              ['leads', 'detail.briefLeads'],
+              ['openQuestions', 'detail.briefOpen'],
+            ]) {
+              const items = Array.isArray(brief[key]) ? brief[key] : []
+              if (items.length === 0) continue
+              addFact(
+                t(label),
+                items.map((item) => `[${item.basis}] ${item.text}${item.impact === 'blocking' ? ' [blocking]' : ''}`).join('；'),
+              )
+            }
+            addFact(t('detail.briefNext'), brief.nextAction)
+            if (detail.briefSource === 'derived') {
+              addFact(t('detail.cause'), core.cause)
+              addFact(t('detail.intent'), core.intent)
+            }
+            const title = detail.briefSource === 'derived'
+              ? `${t('detail.brief')} · ${t('detail.briefDerived')}`
+              : t('detail.brief')
+            if (facts.length > 0) blocks.push(section(title, facts))
+          } else {
+            const facts = []
+            if (core.symptom !== undefined && core.symptom !== '') {
+              facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, t('detail.symptom')), core.symptom))
+            }
+            if (core.cause !== undefined && core.cause !== '') {
+              facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, t('detail.cause')), core.cause))
+            }
+            if (core.intent !== undefined && core.intent !== '') {
+              facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, t('detail.intent')), core.intent))
+            }
+            if (facts.length > 0) blocks.push(h('div', { className: 'tdash-section' }, ...facts))
+          }
           if (detail.request !== null && detail.request !== undefined) {
             blocks.push(section(t('detail.request'), [h('div', { className: 'tdash-request' }, detail.request.text)]))
           }
-          const core = detail.core ?? {}
-          const facts = []
-          if (core.symptom !== undefined && core.symptom !== '') {
-            facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, t('detail.symptom')), core.symptom))
+          const briefWarnings = detail.briefWarnings ?? []
+          if (briefWarnings.length > 0) {
+            blocks.push(
+              section(
+                t('detail.briefWarnings'),
+                briefWarnings.map((warning, index) => h('div', { key: `bw${index}`, className: 'tdash-ref-text' }, warning)),
+              ),
+            )
           }
-          if (core.cause !== undefined && core.cause !== '') {
-            facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, t('detail.cause')), core.cause))
-          }
-          if (core.intent !== undefined && core.intent !== '') {
-            facts.push(h('div', { className: 'tdash-fact' }, h('span', { className: 'tdash-fact-label' }, t('detail.intent')), core.intent))
-          }
-          if (facts.length > 0) blocks.push(h('div', { className: 'tdash-section' }, ...facts))
 
           const mustRead = detail.mustRead ?? []
           if (mustRead.length > 0) {

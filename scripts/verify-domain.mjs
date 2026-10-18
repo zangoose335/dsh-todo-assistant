@@ -132,6 +132,7 @@ async function main() {
       nextStep: '检查 refresh 是否带 rotation',
       sessionId: 'sess-verify',
       touchedFiles: ['src/auth/router.ts'],
+      brief: { goal: '修复鉴权 token 刷新后 401', nextAction: '检查 refresh 是否带 rotation' },
     })
     check('create returns a td_ id', /^td_[a-z0-9]{4}$/u.test(created.item.id), created.item.id)
     checkEqual('new card starts open', created.item.status, 'open')
@@ -227,7 +228,7 @@ async function main() {
     checkEqual('tool name', tool.name, 'todo_add')
     check('tool demands consent in its description', tool.description.includes('explicitly agreed'), tool.description)
     check('tool forbids self-driven read-back', tool.description.includes('never read it back on your own'), '')
-    checkEqual('required parameters', tool.parameters.required, ['title', 'kind', 'nextStep', 'touchedFiles', 'mustRead'])
+    checkEqual('required parameters', tool.parameters.required, ['title', 'kind', 'touchedFiles', 'mustRead'])
 
     const sequence = [
       { type: 'turn/start', seq: 4, data: { turn: 3 } },
@@ -325,7 +326,7 @@ async function main() {
     }
     const requestExec = { agent: { id: 'sess-tool', session: requestSession } }
     const withRequest = await tool.execute(
-      { title: '导出 CSV 表头重复', kind: 'defect', nextStep: '查 header 写出逻辑', touchedFiles: ['src/export/csv.ts'], mustRead: [] },
+      { title: '导出 CSV 表头重复', kind: 'defect', nextStep: '查 header 写出逻辑', touchedFiles: ['src/export/csv.ts'], mustRead: [{ label: '现象', text: '多页导出时表头重复' }] },
       requestExec,
     )
     const storedRequest = store.get(withRequest.id).request
@@ -355,11 +356,11 @@ async function main() {
     }
     const markerExec = { agent: { id: 'sess-tool', session: markerSession } }
     const firstBlock = await tool.execute(
-      { title: '标记第一段', kind: 'idea', nextStep: 'n1', touchedFiles: ['src/a/one.ts'], mustRead: [] },
+      { title: '标记第一段', kind: 'idea', nextStep: 'n1', touchedFiles: ['src/a/one.ts'], mustRead: [{ label: '标记', text: '第一段内容' }] },
       markerExec,
     )
     const secondBlock = await tool.execute(
-      { title: '标记第二段', kind: 'idea', nextStep: 'n2', touchedFiles: ['src/a/two.ts'], mustRead: [] },
+      { title: '标记第二段', kind: 'idea', nextStep: 'n2', touchedFiles: ['src/a/two.ts'], mustRead: [{ label: '标记', text: '第二段内容' }] },
       markerExec,
     )
     checkEqual('the first capture takes the first block', store.get(firstBlock.id).request.text, '第一段内容')
@@ -378,7 +379,7 @@ async function main() {
         nextStep: 'n',
         touchedFiles: ['/tmp/repo-a/src/abs/one.ts', './src/rel/two.ts', 'src/rel/two.ts'],
         symbols: [{ file: '/tmp/repo-a/src/abs/one.ts', symbol: 'refresh' }],
-        mustRead: [],
+        mustRead: [{ label: '路径', text: '绝对路径和相对路径都要归一化' }],
       },
       exec,
     )
@@ -641,7 +642,7 @@ async function main() {
     check('duplicate answer names the shared file', duplicate.sharedFiles.includes('src/auth/router.ts'), JSON.stringify(duplicate))
     checkEqual('the duplicate path stores nothing', store.all().filter((card) => card.title.startsWith('刷新 token 后 401')).length, 1)
     const unrelated = await tool.execute(
-      { title: '刷新 token 后 401！', kind: 'defect', nextStep: '再查一次', touchedFiles: ['src/ui/button.tsx'], mustRead: [] },
+      { title: '刷新 token 后 401！', kind: 'defect', nextStep: '再查一次', touchedFiles: ['src/ui/button.tsx'], mustRead: [{ label: '界面', text: '按钮触发刷新流程' }] },
       exec,
     )
     checkEqual('a shared title alone is not a duplicate', unrelated.status, 'created')

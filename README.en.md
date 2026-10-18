@@ -121,16 +121,27 @@ and send them through the capture flow.
 
 ## What's in a card?
 
-A card organizes the information needed to resume the task, such as:
+A card starts with a **task brief**, then keeps the supporting evidence and context:
 
--   A title and the task type inferred by the AI;
--   Symptoms, cause, or intent, where relevant;
--   The next step;
--   Related files and code coordinates;
--   Concise must-read information;
--   The developer's original request;
--   Follow-up notes;
--   Git commit and branch information at capture time, when available.
+-   **Goal:** what problem to solve or feature to implement;
+-   **Why (optional):** why it matters;
+-   **Confirmed facts and decisions:** every item states how it is known;
+-   **Constraints:** conditions that must not be violated;
+-   **Leads:** files, symbols, or documents; auxiliary only;
+-   **Next action:** the first concrete step;
+-   **Open questions (optional):** unresolved gaps that may affect execution.
+
+`brief.nextAction` is the canonical next step. The legacy `nextStep` field is kept as a
+compatibility mirror: a brief-only call works, a legacy nextStep-only call still works, and when both
+conflict the brief wins with a warning. Every normal write keeps the two in sync.
+
+A simple task may contain only goal + nextAction; the other fields are not mandatory. Every brief item
+must say whether it is a `requirement`, `decided` decision, `verified` fact, `inferred` guess, `unknown`,
+or `superseded`. Inferences are never presented as confirmed facts.
+
+When an old card has no brief, the plugin derives a read-only brief from `core`, `mustRead`, `park`, and
+`touchedFiles`. Derived data is never written back in bulk, and legacy facts without a basis are treated
+as `unknown`, not verified.
 
 The Host stores the developer's original request directly from the user
 message rather than relying on the AI to paraphrase it. This makes it
@@ -156,8 +167,8 @@ without silently rewriting the original card.
 ### Layered retrieval
 
 -   **Index:** quickly see titles, statuses, and task types.
--   **Card:** read the task details, next step, must-read text, files,
-    and notes.
+-   **Card:** read the task brief first (goal, why, confirmed facts/decisions, constraints, next action,
+    open questions), then must-read text, files, and notes.
 -   **Original session:** inspect a manifest of available messages, then
     retrieve selected excerpts.
 
@@ -181,12 +192,32 @@ AI to add useful new evidence to a card when appropriate.
 
 -   Workspace-scoped cards; cards outside any workspace appear under
     **All workspaces**;
--   Near-duplicate detection;
+-   Near-duplicate detection: a shared file is required; similar titles or task goals can support a match,
+    while the same file with clearly different goals is not blocked by title similarity alone. A match is a
+    prompt, not an automatic merge or cancellation: create with `forceCreate` after explicit confirmation, or
+    append with `todo_note`;
 -   Short card labels such as `#3.2` for referencing cards in
     conversation;
 -   Per-workspace rules, included in new sessions created by the plugin;
 -   Tools for reading cards, appending notes, updating status, listing
     tasks, and retrieving original-session excerpts.
+
+## Current stage and limits
+
+P0-BASE, T1, T2, T3, and T4 are implemented at the foundation level:
+
+-   TaskBrief creation, persistence, reading, legacy derivation, and sidebar display;
+-   the `brief.nextAction` / legacy `nextStep` contract;
+-   brief-aware duplicate detection (shared file plus title/goal similarity);
+-   version-1 compatibility, brief persistence, and a downgrade-risk simulation.
+
+**Gate 1/T5 has not passed.** The ten scenarios still need real-model and UI verification. New captures with
+no brief and no mustRead/symptom/cause/intent but with only file/source pointers are now rejected with
+`todo/brief-required`; that is not full Gate 1 evidence. Do not describe the current state as Gate 1 passed.
+
+Full history retrieval/authorization, brief-first handoff seeds, Project Plan, Markdown import/export, and
+drag-and-drop are not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older
+schema may strip the new `brief` field, so do not write new data back with an old version.
 
 ## Installation
 

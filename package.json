@@ -30,6 +30,7 @@
   "files": [
     "host.js",
     "domain.js",
+    "brief.js",
     "api.js",
     "tool.js",
     "git.js",

@@ -19,6 +19,8 @@
  * table names, so the domain uses the underscore spelling while the package,
  * the channel, and every user-facing string say `todo-assistant`.
  */
+import { BRIEF_BASES, BRIEF_IMPACTS, briefForRecord, briefQuality, normalizeBrief } from './brief.js'
+
 export const DOMAIN_NAME = 'todo_assistant'
 /** Bumped only when a stored record would no longer validate. */
 export const DOMAIN_VERSION = 1
@@ -93,6 +95,23 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     line: z.number().int().optional(),
   })
 
+  const briefItem = z.object({
+    text: z.string(),
+    basis: z.enum(BRIEF_BASES),
+    sourceIds: z.array(z.string()).optional(),
+    impact: z.enum(BRIEF_IMPACTS).optional(),
+  })
+
+  const brief = z.object({
+    goal: z.string(),
+    why: z.string().optional(),
+    confirmed: z.array(briefItem).default([]),
+    constraints: z.array(briefItem).default([]),
+    leads: z.array(briefItem).default([]),
+    nextAction: z.string(),
+    openQuestions: z.array(briefItem).default([]),
+  })
+
   const todoRecord = z.object({
     id: z.string(),
     /** Short label `major.minor`: major per origin session, minor within it. */
@@ -147,6 +166,9 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
       nextStep: z.string(),
       intent: z.string().optional(),
     }),
+
+    /** Optional task brief; old cards project a derived brief at read time. */
+    brief: brief.optional(),
 
     mustRead: z.array(evidenceRef).default([]),
     park: z.array(parkedRef).default([]),
@@ -315,15 +337,31 @@ export function buildRecord(input, { now, nextId, label }) {
   const at = now()
   const sessionId = cleanLine(input?.sessionId, 256)
   const rootSessionId = cleanLine(input?.rootSessionId, 256)
+  const briefResult = normalizeBrief(input?.brief)
+  if (briefResult.errors.length > 0) {
+    const first = briefResult.errors[0]
+    throw new TodoInputError(first.code, first.message)
+  }
   const core = {
     nextStep: cleanLine(input?.nextStep, NEXT_STEP_LIMIT),
   }
+  if (briefResult.brief !== undefined) core.nextStep = briefResult.brief.nextAction
   const symptom = optionalText(input?.symptom, NEXT_STEP_LIMIT)
   const cause = optionalText(input?.cause, NEXT_STEP_LIMIT)
   const intent = optionalText(input?.intent, NEXT_STEP_LIMIT)
   if (symptom !== undefined) core.symptom = symptom
   if (cause !== undefined) core.cause = cause
   if (intent !== undefined) core.intent = intent
+  const touchedFiles = Array.isArray(input?.touchedFiles)
+    ? [...new Set(input.touchedFiles.slice(0, 32).map((file) => normalizeTouchedPath(cleanLine(file, 1024), workspace)).filter(Boolean))]
+    : []
+  const substantive = core.symptom !== undefined || core.cause !== undefined || core.intent !== undefined
+  if (briefResult.brief === undefined && !substantive && touchedFiles.length > 0) {
+    throw new TodoInputError(
+      'todo/brief-required',
+      'file paths alone are not a task brief; add a brief or at least one substantive symptom/cause/intent, or leave touchedFiles empty for a simple legacy card',
+    )
+  }
 
   return {
     id: nextId(),
@@ -346,10 +384,9 @@ export function buildRecord(input, { now, nextId, label }) {
             at,
           },
         }),
+    ...(briefResult.brief === undefined ? {} : { brief: briefResult.brief }),
     code: emptyCode(),
-    touchedFiles: Array.isArray(input?.touchedFiles)
-      ? [...new Set(input.touchedFiles.slice(0, 32).map((file) => normalizeTouchedPath(cleanLine(file, 1024), workspace)).filter(Boolean))]
-      : [],
+    touchedFiles,
     core,
     mustRead: [],
     park: [],
@@ -380,7 +417,28 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
   if (!KINDS.includes(kind)) {
     throw new TodoInputError('todo/invalid-kind', `kind must be one of: ${KINDS.join(', ')}`)
   }
-  const nextStep = cleanLine(input?.nextStep)
+  const warnings = []
+  const briefResult = normalizeBrief(input?.brief)
+  if (briefResult.errors.length > 0) {
+    const first = briefResult.errors[0]
+    throw new TodoInputError(first.code, first.message)
+  }
+  if (briefResult.brief !== undefined) {
+    const briefWarnings = [
+      ...briefResult.warnings,
+      ...briefQuality(briefResult.brief, { source: 'stored' }),
+    ]
+    warnings.push(...new Set(briefWarnings))
+  }
+  let nextStep = cleanLine(input?.nextStep)
+  if (briefResult.brief !== undefined && nextStep !== briefResult.brief.nextAction) {
+    warnings.push(
+      nextStep === ''
+        ? 'nextStep was empty; using brief.nextAction'
+        : 'nextStep differs from brief.nextAction; the brief value is canonical and core.nextStep was synchronized',
+    )
+    nextStep = briefResult.brief.nextAction
+  }
   if (nextStep === '') {
     throw new TodoInputError('todo/next-step-required', 'nextStep is required: how to fix it (defect) or what to verify (idea)')
   }
@@ -388,7 +446,6 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
     throw new TodoInputError('todo/next-step-too-long', `nextStep must be at most ${CAPTURE_LIMITS.nextStep} characters`)
   }
 
-  const warnings = []
   const mustReadRaw = input?.mustRead === undefined || input?.mustRead === null ? [] : input.mustRead
   if (!Array.isArray(mustReadRaw)) throw new TodoInputError('todo/invalid-must-read', 'mustRead must be an array')
   if (mustReadRaw.length > CAPTURE_LIMITS.mustReadItems) {
@@ -462,6 +519,8 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
   }
   if (touchedFiles.length === 0) {
     warnings.push('touchedFiles is empty: the card cannot be matched to later work by file, so recording it is weaker')
+  } else if (briefResult.brief === undefined && mustRead.length === 0) {
+    warnings.push('no task brief and no must-read facts: the card has file paths but no task intelligence; add a brief instead of relying on paths')
   }
 
   const core = { nextStep }
@@ -471,6 +530,14 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
   if (symptom !== undefined) core.symptom = symptom
   if (cause !== undefined) core.cause = cause
   if (intent !== undefined) core.intent = intent
+
+  const substantive = mustRead.length > 0 || core.symptom !== undefined || core.cause !== undefined || core.intent !== undefined
+  if (briefResult.brief === undefined && !substantive && (touchedFiles.length > 0 || park.length > 0 || symbols.length > 0)) {
+    throw new TodoInputError(
+      'todo/brief-required',
+      'source pointers alone are not a task brief; add a brief or at least one mustRead fact (simple legacy cards without paths remain compatible)',
+    )
+  }
 
   const at = now()
   const record = {
@@ -484,6 +551,7 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
     updatedAt: at,
     ...(origin === undefined ? {} : { origin }),
     ...(request === undefined ? {} : { request }),
+    ...(briefResult.brief === undefined ? {} : { brief: briefResult.brief }),
     code: code === undefined ? emptyCode() : { ...code, symbols },
     touchedFiles,
     core,
@@ -518,7 +586,22 @@ export function applyPatch(record, patch, at) {
     next.status = patch.status
   }
   if (patch?.nextStep !== undefined) {
-    next.core = { ...record.core, nextStep: cleanLine(patch.nextStep, NEXT_STEP_LIMIT) }
+    const nextStep = cleanLine(patch.nextStep, NEXT_STEP_LIMIT)
+    next.core = { ...record.core, nextStep }
+    if (next.brief !== undefined) next.brief = { ...next.brief, nextAction: nextStep }
+  }
+  if (patch?.brief !== undefined) {
+    const result = normalizeBrief(patch.brief)
+    if (result.errors.length > 0) {
+      const first = result.errors[0]
+      throw new TodoInputError(first.code, first.message)
+    }
+    if (result.brief === undefined) {
+      delete next.brief
+    } else {
+      next.brief = result.brief
+      next.core = { ...next.core, nextStep: result.brief.nextAction }
+    }
   }
   // The verbatim request is normally host-captured; this path repairs a card
   // whose capture predates the block-aware rule.
@@ -551,13 +634,15 @@ export function projectL0(record) {
     workspace: record.workspace,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
-    nextStep: record.core?.nextStep ?? '',
+    nextStep: record.brief?.nextAction ?? record.core?.nextStep ?? '',
     symptom: record.core?.symptom ?? '',
     touchedFiles: files.slice(0, 3),
     touchedFileCount: files.length,
     notesCount: (record.notes ?? []).length,
     parkCount: (record.park ?? []).length,
     mustReadCount: (record.mustRead ?? []).length,
+    hasBrief: record.brief !== undefined,
+    briefGoal: (record.brief?.goal ?? record.core?.symptom ?? record.core?.intent ?? record.title ?? '').slice(0, 120),
     origin: record.origin === undefined ? null : { sessionId: record.origin.sessionId, turn: record.origin.turn, at: record.origin.at },
     handlingSession: record.handling === undefined ? null : record.handling.sessionId,
     hasRequest: record.request !== undefined,
@@ -572,10 +657,19 @@ export function projectL0(record) {
  * @returns the full projection.
  */
 export function projectFull(record) {
-  const core = { nextStep: record.core?.nextStep ?? '' }
+  const briefView = briefForRecord(record)
+  let core = { nextStep: record.core?.nextStep ?? '' }
   if (record.core?.symptom !== undefined) core.symptom = record.core.symptom
   if (record.core?.cause !== undefined) core.cause = record.core.cause
   if (record.core?.intent !== undefined) core.intent = record.core.intent
+  let briefWarnings = briefQuality(briefView.brief, { source: briefView.source })
+  if (briefView.source === 'derived') {
+    briefWarnings = briefWarnings.filter((warning) => !warning.startsWith('brief was derived from legacy fields'))
+  }
+  if (briefView.source === 'stored' && briefView.brief?.nextAction !== core.nextStep) {
+    briefWarnings = [...briefWarnings, 'core.nextStep differed from brief.nextAction; the brief value is canonical']
+    core = { ...core, nextStep: briefView.brief.nextAction }
+  }
   return {
     id: record.id,
     ...labelOf(record),
@@ -585,6 +679,9 @@ export function projectFull(record) {
     workspace: record.workspace,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    brief: briefView.brief,
+    briefSource: briefView.source,
+    briefWarnings,
     core,
     mustRead: record.mustRead ?? [],
     park: record.park ?? [],

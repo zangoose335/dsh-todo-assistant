@@ -51,6 +51,16 @@ function requireRecord(value) {
   return value
 }
 
+/** A diagnostic when a manual write supplies two different next actions. */
+function nextActionWarnings(nextStep, brief) {
+  const legacy = typeof nextStep === 'string' ? nextStep.replace(/\s+/gu, ' ').trim() : ''
+  const canonical = typeof brief?.nextAction === 'string' ? brief.nextAction.replace(/\s+/gu, ' ').trim() : ''
+  if (legacy !== '' && canonical !== '' && legacy !== canonical) {
+    return ['nextStep differs from brief.nextAction; the brief value is canonical and core.nextStep was synchronized']
+  }
+  return []
+}
+
 /**
  * Open a typed view over the `todos` table.
  *
@@ -332,14 +342,16 @@ export function createApi({ store, now = Date.now, hitIds, resolveRoot }) {
       const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : ''
       const rootSessionId = sessionId !== '' && typeof resolveRoot === 'function' ? resolveRoot(sessionId) : ''
       const record = await store.create({ ...payload, rootSessionId }, now)
-      return { item: projectL0(record) }
+      const warnings = nextActionWarnings(payload?.nextStep, payload?.brief)
+      return { item: projectL0(record), ...(warnings.length === 0 ? {} : { warnings }) }
     },
 
     /** Manual edit: title, status, next step. */
     async patch(payload) {
       const id = resolveRef(store, payload)
       const record = await store.update(id, payload?.patch, now)
-      return { item: projectL0(record) }
+      const warnings = nextActionWarnings(payload?.patch?.nextStep, payload?.patch?.brief)
+      return { item: projectL0(record), ...(warnings.length === 0 ? {} : { warnings }) }
     },
 
     /** Delete a card. */
