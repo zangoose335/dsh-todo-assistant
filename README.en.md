@@ -81,13 +81,15 @@ from a local checkout or pin a Git commit. See
 
 In the right sidebar, click `+` and select **Todo Assistant**.
 
-Cards can be filtered by workspace or viewed in the global Inbox. The
-sidebar includes Unfinished, To fix, To add, Done, and All views.
+Cards are viewed by workspace; cards that belong to no workspace are
+visible only in the **All workspaces** view. The sidebar includes
+Unfinished, To fix, To add, Done, and All views.
 
 ### 3. Capture a side task
 
 You can ask the AI to record a task and explicitly approve its creation,
-or use a marker:
+or use a marker. One reply may contain several markers, recording several
+todos at once:
 
 ``` text
 #MEMO Add the ability to edit a meeting title after the meeting is recorded. Finish the current main feature first, then implement title editing and verify that the updated title is saved and displayed correctly.
@@ -177,7 +179,8 @@ AI to add useful new evidence to a card when appropriate.
 
 ## More features
 
--   Workspace-scoped cards and a global Inbox;
+-   Workspace-scoped cards; cards outside any workspace appear under
+    **All workspaces**;
 -   Near-duplicate detection;
 -   Short card labels such as `#3.2` for referencing cards in
     conversation;
