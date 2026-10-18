@@ -87,7 +87,16 @@ export async function apply(ctx) {
 
   const detector = createDetector({ store })
   const markers = createMarkerQueue()
-  const api = createApi({ store, hitIds: (sessionId) => detector.hitIds(sessionId), resolveRoot })
+  const api = createApi({
+    store,
+    hitIds: (sessionId) => detector.hitIds(sessionId),
+    resolveRoot,
+    resolveSessionWorkspace: async (sessionId) => {
+      const agent = ctx.get('agents')?.get(sessionId)
+      const cwd = typeof agent?.session?.header?.cwd === 'string' ? agent.session.header.cwd : ''
+      return resolveWorkspace(cwd)
+    },
+  })
 
   ctx.on('session/event', (session, event) => detector.onSessionEvent(session, event))
   // `#DB … #/db` must reach the step that ANSWERS the message, and the loop

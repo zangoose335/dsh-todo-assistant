@@ -27,9 +27,13 @@ export const TOOL_DESCRIPTION = [
   'Write only what belongs to this todo. Leave out everything about the main task; unrelated findings pollute later work.',
   'This is a form, not a summary: pick fields from what you already know. Do not restate the conversation.',
   'Use only content still visible in your context. If you believe earlier, compacted content matters, ask the developer whether to read it back first — never read it back on your own.',
-  'Build a compact task brief from what is visible now: goal, why when it adds context, confirmed facts/decisions, constraints, leads, nextAction, and openQuestions. Simple tasks may be only goal + nextAction; do not fill fields mechanically.',
+  'Build a compact task brief from what is visible now: goal, why when it adds context, confirmed facts/decisions, constraints, leads, nextAction, and openQuestions. For a simple task, goal + nextAction are enough; omit why unless it adds real background, and leave confirmed, constraints, leads, and openQuestions empty unless they contain information beyond the goal itself.',
+  'Do not copy goal or title into confirmed or mustRead. confirmed is only for facts/decisions beyond the goal; mustRead is only for material a later session must actually read, and an empty mustRead array is valid. Do not invent or restate content to make the brief look complete.',
+  'Before adding a confirmed item, ask: if this item were removed, would a later reader lose information that is not already in goal, title, or another field? If not, omit it. A paraphrase of the goal is not a confirmed fact; statements such as "the todo is to buy milk tomorrow", "it is confirmed that we need to fix login", or "the task is X" must not be added. If the only known information is the requested todo, confirmed must be empty, even when the item would have basis requirement.',
+  'nextAction may only describe the next action the request supports: turn the request into a concise action, but do not add reminders, suggestions, errands, or extra steps that were not asked for and are not necessary to complete the task.',
   'Every brief item must declare its basis: requirement (the developer asked for it), decided (the developer confirmed it), verified (a fact backed by evidence), inferred (your inference), unknown (not confirmed), or superseded (replaced by a later decision). Never write an inference or unknown as a confirmed fact/decision.',
   'Do not record only a title, next step, and file paths. If the task itself is unclear, ask the developer or put the missing piece in openQuestions with impact=blocking; do not invent details and do not read history to complete the brief.',
+  'For an unmarked user message, set requestExcerpt to the exact sentence(s) that belong to this todo (never paraphrase), or to an empty string when the message is only a capture instruction or also contains unrelated tasks. If you omit it, the host keeps a single paragraph in full, but for multiple paragraphs it saves only the first paragraph (or nothing if that is only a capture instruction). For #DB/#MEMO messages leave requestExcerpt out; the host records the marked block in full.',
   'Determine intent before writing: if the developer explicitly asks to add/update an existing card, use todo_note on that card instead of todo_add; if they explicitly ask for a new card, use todo_add; if the intent is unclear, ask. If todo_add reports a similar card, tell the developer which card and ask whether to create anyway or append with todo_note. A similarity signal is never permission to merge or cancel the request. Only after explicit confirmation may you retry todo_add with forceCreate=true; never set forceCreate on your own initiative.',
 ].join(' ')
 
@@ -54,15 +58,19 @@ export function currentTurn(session) {
 }
 
 /**
- * The developer's own words for this capture: the latest human (`source.kind ===
- * 'user'`) message in the current turn, verbatim. Synthetic injections carry a
- * different producer kind and are skipped.
+ * The developer's own words for this capture. A marked `#DB … #/db` message is
+ * always recorded as its full extracted block. For an unmarked message the
+ * model may pass an exact excerpt; `requestExcerpt: ''` means "this message has
+ * nothing todo-specific to keep". Omitting it keeps the legacy full-message
+ * fallback.
  *
  * @param session - the calling agent's live session.
  * @param now - clock.
- * @returns the request record, or undefined when nobody typed anything.
+ * @param store - optional card store, for multi-block turn assignment.
+ * @param requestExcerpt - exact untagged-message excerpt, `''` for none.
+ * @returns `{ request, warning? }`; request is undefined when nothing applies.
  */
-function requestOf(session, now, store) {
+function requestOf(session, now, store, requestExcerpt) {
   try {
     const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : []
     let turn = 0
@@ -78,7 +86,7 @@ function requestOf(session, now, store) {
       const text = parts.join('\n').trim()
       if (text !== '') latest = { text, turn, at: now(), messageId: typeof event.data?.id === 'string' ? event.data.id : undefined }
     }
-    if (latest === undefined) return undefined
+    if (latest === undefined) return { request: undefined }
     const LIMIT = 8000
     const cap = (value) => {
       const chars = [...value]
@@ -88,25 +96,83 @@ function requestOf(session, now, store) {
     // A `#DB … #/db` message: the request is that block alone (markers already
     // stripped by the extraction), one block per capture in message order.
     const blocks = extractTodoBlocks(latest.text)
-    if (blocks.length === 0) return { ...latest, ...cap(latest.text) }
-    const used = new Set()
-    if (store !== undefined) {
-      for (const card of store.all()) {
-        const request = card.request
-        if (request === undefined || !Number.isInteger(request.block)) continue
-        if (request.turn === latest.turn && request.messageId === latest.messageId) used.add(request.block)
+    if (blocks.length > 0) {
+      const used = new Set()
+      if (store !== undefined) {
+        for (const card of store.all()) {
+          const request = card.request
+          if (request === undefined || !Number.isInteger(request.block)) continue
+          if (request.turn === latest.turn && request.messageId === latest.messageId) used.add(request.block)
+        }
       }
-    }
-    let block = 0
-    for (let index = 0; index < blocks.length; index += 1) {
-      if (!used.has(index)) {
-        block = index
-        break
+      let block = 0
+      for (let index = 0; index < blocks.length; index += 1) {
+        if (!used.has(index)) {
+          block = index
+          break
+        }
       }
+      return { request: { ...latest, ...cap(blocks[block]), block } }
     }
-    return { ...latest, ...cap(blocks[block]), block }
+
+    // Untagged: the model may select the exact todo-related excerpt. Empty means
+    // explicitly no request (e.g. the user only said "record this" or put
+    // unrelated tasks in the same message). A non-matching excerpt is not
+    // quietly replaced with the whole message.
+    if (typeof requestExcerpt === 'string') {
+      const selected = requestExcerpt.trim()
+      if (selected === '') return { request: undefined }
+      const index = latest.text.indexOf(selected)
+      if (index < 0) {
+        return {
+          request: undefined,
+          warning: 'requestExcerpt did not exactly match the latest user message; no request text was stored',
+        }
+      }
+      return { request: { ...latest, ...cap(latest.text.slice(index, index + selected.length)) } }
+    }
+
+    const fallback = fallbackRequestText(latest.text)
+    return {
+      request: fallback.text === undefined ? undefined : { ...latest, ...cap(fallback.text) },
+      ...(fallback.warning === undefined ? {} : { warning: fallback.warning }),
+    }
   } catch {
-    return undefined
+    return { request: undefined }
+  }
+}
+
+/** Whether one paragraph is only a "create a todo" instruction, with no task content. */
+function isOnlyCaptureInstruction(text) {
+  const value = String(text ?? '').replace(/[\s。.!！?？]+$/gu, '').trim()
+  if (value === '' || value.length > 80) return false
+  if (/[,，;；:：]/u.test(value)) return false
+  return /(?:创建|新建|建立|加|添加|记|记录|写入|放到|放进|存到).{0,40}(?:待办|卡片|todo)|(?:create|add|record|save|make).{0,40}(?:todo|card)/iu.test(value)
+}
+
+/**
+ * Conservative fallback when the model did not pass requestExcerpt.
+ * Single-paragraph messages keep the old full-text behavior. A multi-paragraph
+ * message saves only its first paragraph, and omits the request entirely when
+ * that paragraph is only a capture instruction. Precision belongs in
+ * requestExcerpt; this fallback only prevents unrelated later tasks from being
+ * silently attached.
+ */
+function fallbackRequestText(text) {
+  const paragraphs = String(text ?? '')
+    .split(/\n\s*\n/u)
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
+  if (paragraphs.length <= 1) return { text: String(text ?? '').trim() }
+  if (isOnlyCaptureInstruction(paragraphs[0])) {
+    return {
+      text: undefined,
+      warning: 'the user message has multiple paragraphs and its first paragraph is only a capture instruction; no request text was stored (pass requestExcerpt to keep a specific excerpt)',
+    }
+  }
+  return {
+    text: paragraphs[0],
+    warning: 'the user message has multiple paragraphs; only the first paragraph was stored as request (pass requestExcerpt to choose a specific excerpt)',
   }
 }
 
@@ -213,7 +279,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
       mustRead: {
         type: 'array',
         required: true,
-        description: `At most ${CAPTURE_LIMITS.mustReadItems} items, each at most ${CAPTURE_LIMITS.mustReadText} characters: the few facts a later session must not have to rediscover.`,
+        description: `At most ${CAPTURE_LIMITS.mustReadItems} items, each at most ${CAPTURE_LIMITS.mustReadText} characters: material a later session must actually read. Empty is valid; do not copy the goal or title here.`,
         items: {
           type: 'object',
           additionalProperties: false,
@@ -227,16 +293,20 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
       brief: {
         type: 'object',
         additionalProperties: false,
-        description: 'The task brief: what to solve, why, confirmed facts/decisions, constraints, leads, nextAction, and open questions. Optional for backward compatibility; new captures should include it.',
+        description: 'The task brief: what to solve, why, confirmed facts/decisions, constraints, leads, nextAction, and open questions. Simple tasks may contain only goal and nextAction. Optional for backward compatibility; new captures should include it.',
         properties: {
           goal: { type: 'string', required: true, description: `What to solve or implement, at most ${BRIEF_LIMITS.goal} characters.` },
           why: { type: 'string', description: `Why it matters, at most ${BRIEF_LIMITS.why} characters; omit when it adds nothing.` },
-          confirmed: { type: 'array', description: `At most ${BRIEF_LIMITS.confirmedItems} confirmed facts/decisions.`, items: briefItemSchema('confirmed') },
+          confirmed: { type: 'array', description: `At most ${BRIEF_LIMITS.confirmedItems} confirmed facts/decisions beyond the goal. Empty is valid when the only information is the todo itself. Never restate goal, title, or the request here; if removing an item loses no independent information, omit it.`, items: briefItemSchema('confirmed') },
           constraints: { type: 'array', description: `At most ${BRIEF_LIMITS.constraintsItems} constraints that must not be violated.`, items: briefItemSchema('constraint') },
           leads: { type: 'array', description: `At most ${BRIEF_LIMITS.leadsItems} technical leads (files/symbols/docs); leads are not the task brief.`, items: briefItemSchema('lead') },
-          nextAction: { type: 'string', required: true, description: `The first concrete action, at most ${BRIEF_LIMITS.nextAction} characters.` },
+          nextAction: { type: 'string', required: true, description: `The first concrete action, at most ${BRIEF_LIMITS.nextAction} characters. Describe only the action the request supports; do not add unrequested reminders, suggestions, errands, or extra scope.` },
           openQuestions: { type: 'array', description: `At most ${BRIEF_LIMITS.openQuestionsItems} unresolved questions that may affect execution.`, items: briefItemSchema('open question') },
         },
+      },
+      requestExcerpt: {
+        type: 'string',
+        description: 'Optional for an unmarked user message: copy the exact sentence(s) that belong to this todo. Use an empty string when the message is only a capture instruction or contains unrelated tasks, so they are not saved as the developer request. If omitted, a single-paragraph message keeps the full text; a multi-paragraph message keeps only the first paragraph (or nothing if that is only a capture instruction). Ignored when the message has #DB/#MEMO blocks.',
       },
       forceCreate: {
         type: 'boolean',
@@ -370,15 +440,16 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
               ? agent.id
               : ''
       const origin = originOf(session, agent.id, cwd, now(), rootSessionId)
-      const request = requestOf(session, now, store)
-      const { record, warnings } = assembleCapture(args, {
+      const requestResult = requestOf(session, now, store, args?.requestExcerpt)
+      const { record, warnings: captureWarnings } = assembleCapture(args, {
         now,
         nextId: () => mintId((id) => store.has(id)),
         origin,
         code,
         workspace,
-        request,
+        request: requestResult.request,
       })
+      const warnings = requestResult.warning === undefined ? captureWarnings : [...captureWarnings, requestResult.warning]
       const stored = await store.put(record)
       return {
         status: 'created',

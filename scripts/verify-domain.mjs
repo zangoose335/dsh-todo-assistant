@@ -120,7 +120,7 @@ async function main() {
 
     console.log('\nwire surface over a live domain')
     const store = createStore(domain)
-    const api = createApi({ store })
+    const api = createApi({ store, resolveSessionWorkspace: async (sessionId) => (sessionId === 'sess-verify' ? '/tmp/repo-a' : '/tmp/other') })
 
     const empty = await call(api, 'list', { workspace: '/tmp/repo-a' })
     checkEqual('list of an unknown workspace is empty', empty.items, [])
@@ -138,6 +138,8 @@ async function main() {
     checkEqual('new card starts open', created.item.status, 'open')
     checkEqual('workspace is recorded', created.item.workspace, '/tmp/repo-a')
     checkEqual('session from the tab is recorded as origin', created.item.origin?.sessionId, 'sess-verify')
+    const scopedList = await call(api, 'list', { bySession: true, sessionId: 'sess-verify' })
+    check('session-scoped list uses the session workspace', scopedList.workspace === '/tmp/repo-a' && scopedList.items.some((item) => item.id === created.item.id), JSON.stringify(scopedList))
 
     const idea = await call(api, 'create', {
       workspace: 'inbox',
@@ -335,6 +337,129 @@ async function main() {
     checkEqual('the request records its turn', storedRequest.turn, 3)
     checkEqual('manual cards carry no request', store.get(created.item.id)?.request, undefined)
 
+    console.log('\nrequest scope for unmarked messages')
+    const scopedSession = {
+      id: 'sess-tool',
+      header: { cwd: '/tmp/repo-a' },
+      seq: 20,
+      snapshotEvents: () => [
+        { type: 'turn/start', seq: 8, data: { turn: 5 } },
+        {
+          type: 'user/message',
+          seq: 9,
+          data: {
+            id: 'msg-scope',
+            role: 'user',
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: '把 Gate 1 添加进待办。\n另外把导出 CSV 表头重复也处理一下。' }],
+          },
+        },
+      ],
+    }
+    const scopedExec = { agent: { id: 'sess-tool', session: scopedSession } }
+    const noRequest = await tool.execute(
+      {
+        title: '范围测试：只有指令',
+        kind: 'defect',
+        nextStep: '先确认范围',
+        touchedFiles: [],
+        mustRead: [{ label: '指令', text: '这是一个只包含创建指令的消息' }],
+        requestExcerpt: '',
+      },
+      scopedExec,
+    )
+    check('empty requestExcerpt stores no unrelated text', store.get(noRequest.id).request === undefined, JSON.stringify(store.get(noRequest.id).request))
+
+    const exactRequest = await tool.execute(
+      {
+        title: '范围测试：精确摘录',
+        kind: 'defect',
+        nextStep: '先确认范围',
+        touchedFiles: [],
+        mustRead: [{ label: '摘录', text: 'CSV 表头重复' }],
+        requestExcerpt: '导出 CSV 表头重复',
+      },
+      scopedExec,
+    )
+    checkEqual('requestExcerpt stores only the selected exact text', store.get(exactRequest.id).request.text, '导出 CSV 表头重复')
+
+    const mismatchRequest = await tool.execute(
+      {
+        title: '范围测试：摘录不匹配',
+        kind: 'defect',
+        nextStep: '先确认范围',
+        touchedFiles: [],
+        mustRead: [{ label: '摘录', text: '摘录不匹配测试' }],
+        requestExcerpt: '这段文字不在消息里',
+      },
+      scopedExec,
+    )
+    check('a non-matching excerpt stores no request', store.get(mismatchRequest.id).request === undefined, JSON.stringify(store.get(mismatchRequest.id).request))
+    check('a non-matching excerpt produces a warning', mismatchRequest.warnings.some((item) => item.includes('did not exactly match')), JSON.stringify(mismatchRequest))
+
+    const fallbackSession = {
+      id: 'sess-tool',
+      header: { cwd: '/tmp/repo-a' },
+      seq: 24,
+      snapshotEvents: () => [
+        { type: 'turn/start', seq: 10, data: { turn: 6 } },
+        {
+          type: 'user/message',
+          seq: 11,
+          data: {
+            id: 'msg-fallback',
+            role: 'user',
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: '创建一个待办，明天我要去吃火锅。\n\n下一个任务，删除待办 #4.4' }],
+          },
+        },
+      ],
+    }
+    const fallbackExec = { agent: { id: 'sess-tool', session: fallbackSession } }
+    const fallbackRequest = await tool.execute(
+      {
+        title: '回退：多段消息',
+        kind: 'idea',
+        nextStep: '明天去吃火锅',
+        touchedFiles: [],
+        mustRead: [],
+      },
+      fallbackExec,
+    )
+    checkEqual('multi-paragraph fallback keeps only the first paragraph', store.get(fallbackRequest.id).request.text, '创建一个待办，明天我要去吃火锅。')
+    check('multi-paragraph fallback warns about the excerpt choice', fallbackRequest.warnings.some((item) => item.includes('only the first paragraph')), JSON.stringify(fallbackRequest.warnings))
+
+    const instructionSession = {
+      ...fallbackSession,
+      seq: 25,
+      snapshotEvents: () => [
+        { type: 'turn/start', seq: 10, data: { turn: 7 } },
+        {
+          type: 'user/message',
+          seq: 11,
+          data: {
+            id: 'msg-instruction',
+            role: 'user',
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: '把 Gate 1 添加进待办。\n\n当前状态：其余内容属于其他任务。' }],
+          },
+        },
+      ],
+    }
+    const instructionExec = { agent: { id: 'sess-tool', session: instructionSession } }
+    const instructionOnly = await tool.execute(
+      {
+        title: '回退：纯创建指令',
+        kind: 'idea',
+        nextStep: '先确认范围',
+        touchedFiles: [],
+        mustRead: [],
+      },
+      instructionExec,
+    )
+    check('pure capture instruction at the top stores no request', store.get(instructionOnly.id).request === undefined, JSON.stringify(store.get(instructionOnly.id).request))
+    check('pure capture instruction produces a warning', instructionOnly.warnings.some((item) => item.includes('only a capture instruction')), JSON.stringify(instructionOnly.warnings))
+
     console.log('\nmarked blocks become the request')
     const markerSession = {
       id: 'sess-tool',
@@ -356,7 +481,7 @@ async function main() {
     }
     const markerExec = { agent: { id: 'sess-tool', session: markerSession } }
     const firstBlock = await tool.execute(
-      { title: '标记第一段', kind: 'idea', nextStep: 'n1', touchedFiles: ['src/a/one.ts'], mustRead: [{ label: '标记', text: '第一段内容' }] },
+      { title: '标记第一段', kind: 'idea', nextStep: 'n1', touchedFiles: ['src/a/one.ts'], mustRead: [{ label: '标记', text: '第一段内容' }], requestExcerpt: '错误内容' },
       markerExec,
     )
     const secondBlock = await tool.execute(

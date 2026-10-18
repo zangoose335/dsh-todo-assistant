@@ -288,15 +288,46 @@ export function createStore(domain) {
  * @param options - dependencies.
  * @param options.store - the store from {@link createStore}.
  * @param options.now - clock override (tests).
+ * @param options.resolveSessionWorkspace - optional async session-id → workspace-key
+ *   resolver used by `list` when `bySession` is true and `sessionId` is non-empty.
+ *   `host.js` wires it to the session's cwd and the workspace registry; this module
+ *   only calls it. A thrown resolver error is caught by `list`, which falls back to
+ *   INBOX.
  * @returns `{ handle(endpoint, payload) }` answering wire results.
  */
-export function createApi({ store, now = Date.now, hitIds, resolveRoot }) {
+export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveSessionWorkspace }) {
   const endpointMap = {
-    /** List cards for one bucket, or every bucket. */
+    /**
+     * List cards for one bucket, or every bucket.
+     *
+     * Filtering:
+     * - `all: true` without `bySession` returns every workspace; the result
+     *   `workspace` is null.
+     * - `bySession: true` with a non-empty string `sessionId` resolves that
+     *   session's workspace through `resolveSessionWorkspace` and returns the
+     *   cards in it. If the resolver is absent, `payload.workspace`/INBOX is
+     *   used; if it throws, the endpoint falls back to INBOX.
+     * - `bySession: true` with an empty/missing `sessionId` does not call the
+     *   resolver; `all` is false and `payload.workspace`/INBOX is used.
+     * - Otherwise, `payload.workspace`/INBOX is used.
+     *
+     * A non-empty `sessionId` is also passed to `hitIds`, whether or not
+     * `bySession` is set. Host-level fallbacks: `host.js` resolves a missing
+     * session/cwd to INBOX; when the workspace registry is absent, or
+     * `resolveByPath` returns undefined or throws, it falls back to the session
+     * cwd.
+     */
     async list(payload) {
-      const all = payload?.all === true
-      const workspace = typeof payload?.workspace === 'string' ? payload.workspace : INBOX
+      const all = payload?.all === true && payload?.bySession !== true
       const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : ''
+      let workspace = typeof payload?.workspace === 'string' ? payload.workspace : INBOX
+      if (payload?.bySession === true && sessionId !== '' && typeof resolveSessionWorkspace === 'function') {
+        try {
+          workspace = await resolveSessionWorkspace(sessionId)
+        } catch {
+          workspace = INBOX
+        }
+      }
       const hits = sessionId !== '' && typeof hitIds === 'function' ? hitIds(sessionId) : undefined
       const items = store.all().filter((record) => all || record.workspace === workspace)
       return {
