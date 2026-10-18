@@ -24,13 +24,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { createApi, createStore } from '../api.js'
-import { createTodoSpec, labelOf } from '../domain.js'
+import { SOURCE_LIMIT, createTodoSpec, labelOf, projectFull, projectL0 } from '../domain.js'
 import { readCodeCoordinates } from '../git.js'
 import { createTodoAddTool, createTodoListTool, createTodoNoteTool, createTodoReadTool, createTodoRecallTool, createTodoStatusTool } from '../tool.js'
 import { createDetector, filesFromToolCall, matchingPath, normalizePath, reminderLine } from '../detect.js'
 import { createMarkerQueue, extractTodoBlocks, messageText } from '../marker.js'
 import { findDuplicate, titleSimilarity } from '../dedupe.js'
 import { createRecall } from '../recall.js'
+import { recallApprovalDecision } from '../approval.js'
 
 const INSTALL_ROOT = process.env.DSH_INSTALL_ROOT ?? '/opt/homebrew/lib/node_modules/@deepseek-ai/dsh'
 const MODULES = join(INSTALL_ROOT, 'node_modules')
@@ -235,6 +236,7 @@ async function main() {
     const sequence = [
       { type: 'turn/start', seq: 4, data: { turn: 3 } },
       { type: 'user/message', seq: 5, data: {} },
+      { type: 'tool/call', seq: 6, data: { turn: 3, name: 'read', arguments: JSON.stringify({ file_path: '/tmp/repo-a/src/auth/refresh.ts' }) } },
       { type: 'tool/result', seq: 9, data: {} },
     ]
     const session = {
@@ -252,10 +254,10 @@ async function main() {
         symptom: '刷新后下一个请求 401',
         touchedFiles: ['src/auth/router.ts', 'src/auth/router.ts', 'src/auth/refresh.ts'],
         mustRead: [
-          { label: 'refresh 实现', text: 'refresh() 直接返回旧 token', where: { file: 'src/auth/refresh.ts', seqRange: [5, 9] } },
-          { label: '调用点', text: 'router.ts:88 没有 await rotate()' },
+          { label: 'refresh 实现', text: 'refresh() 直接返回旧 token', where: { file: 'src/auth/refresh.ts', seqRange: [5, 9] }, basis: 'verified', sourceIds: ['s0', 's0', ''] },
+          { label: '调用点', text: 'router.ts:88 没有 await rotate()', where: { file: 'src/auth/router.ts' } },
         ],
-        park: [{ label: 'auth 测试夹具', why: '可能也要改 mock' }],
+        park: [{ label: 'auth 测试夹具', why: '可能也要改 mock', basis: 'inferred' }],
         symbols: [{ file: 'src/auth/refresh.ts', symbol: 'refresh', line: 30 }],
       },
       exec,
@@ -269,6 +271,11 @@ async function main() {
     checkEqual('touched files deduplicated', stored.touchedFiles, ['src/auth/router.ts', 'src/auth/refresh.ts'])
     checkEqual('park ids are stable', stored.park.map((item) => item.id), ['p1'])
     checkEqual('mustRead where kept', stored.mustRead[0].where, { file: 'src/auth/refresh.ts', seqRange: [5, 9] })
+    checkEqual('mustRead source ids are deduplicated', stored.mustRead[0].sourceIds, ['s0'])
+    checkEqual('mustRead basis is kept', stored.mustRead[0].basis, 'verified')
+    checkEqual('park basis is kept', stored.park[0].basis, 'inferred')
+    checkEqual('a read file is observed', stored.mustRead[0].observed, true)
+    checkEqual('an unread file is unverified', stored.mustRead[1].observed, false)
     checkEqual('capture output counts', [captured.status, captured.mustRead, captured.park, captured.warnings], ['created', 2, 1, []])
     checkOutput(tool, captured, 'todo_add created')
     console.log('\nlabels (major.minor)')
@@ -306,6 +313,66 @@ async function main() {
     checkEqual('a legacy number migrates to 1.x', labelOf(store.get('td_legacy')).label, '1.7')
     check('migration reports the migrated record', migratedCount === 1, String(migratedCount))
     await domain.table('todos').delete('td_legacy')
+
+    console.log('\nA2 sources')
+    const sourceCardId = captured.id
+    const sourceCardBefore = store.get(sourceCardId)
+    const sourceAdded = await store.addSource(
+      sourceCardId,
+      {
+        sid: 's1',
+        kind: 'session',
+        label: 'earlier turn',
+        purpose: 'why the old plan was rejected',
+        where: { sessionId: 'sess-earlier', seqRange: [1, 9] },
+        turnRange: [1, 2],
+      },
+      () => 1_800_000_200_000,
+    )
+    checkEqual('a source pointer is appended', sourceAdded.sources.map((source) => source.sid), ['s1'])
+    checkEqual('adding a source keeps updatedAt', sourceAdded.updatedAt, sourceCardBefore.updatedAt)
+    const duplicateSource = await store.addSource(
+      sourceCardId,
+      { sid: 's1b', kind: 'session', label: 'duplicate pointer', where: { sessionId: 'sess-earlier', seqRange: [1, 9] } },
+      () => 1_800_000_200_001,
+    )
+    checkEqual('duplicate kind+where+seqRange is ignored', duplicateSource.sources.length, 1)
+    checkEqual('findSource resolves by sid', store.findSource(sourceCardId, 's1')?.label, 'earlier turn')
+    let sourceRow = projectL0(store.get(sourceCardId))
+    checkEqual('L0 source counts', [sourceRow.sourceCount, sourceRow.sessionSourceCount, sourceRow.fileSourceCount], [1, 1, 0])
+    const fileSourceAdded = await store.addSource(
+      sourceCardId,
+      { sid: 's2', kind: 'file', label: 'src/auth/router.ts', purpose: 'the file to inspect', where: { file: 'src/auth/router.ts' } },
+      () => 1_800_000_200_002,
+    )
+    sourceRow = projectL0(store.get(sourceCardId))
+    checkEqual('L0 file source count', [sourceRow.sourceCount, sourceRow.sessionSourceCount, sourceRow.fileSourceCount], [2, 1, 1])
+    checkEqual('projectFull returns stored sources', projectFull(store.get(sourceCardId)).sources.map((source) => source.sid), ['s1', 's2'])
+    check('source pointers carry no body text', projectFull(store.get(sourceCardId)).sources.every((source) => !Object.hasOwn(source, 'text')), JSON.stringify(projectFull(store.get(sourceCardId)).sources))
+    for (let index = 0; index < SOURCE_LIMIT - 2; index += 1) {
+      await store.addSource(
+        sourceCardId,
+        { sid: `bulk${index}`, kind: 'session', label: `bulk ${index}`, where: { sessionId: 'bulk', seqRange: [index, index] } },
+        () => 1_800_000_200_100 + index,
+      )
+    }
+    checkEqual('source limit is 32', store.get(sourceCardId).sources.length, SOURCE_LIMIT)
+    try {
+      await store.addSource(sourceCardId, { sid: 'overflow', kind: 'session', label: 'overflow', where: { sessionId: 'overflow', seqRange: [1, 1] } }, () => 1_800_000_200_900)
+      check('source over the limit is rejected', false, 'no rejection')
+    } catch (error) {
+      check('source over the limit is rejected', error.code === 'todo/source-limit', `${error.code}: ${error.message}`)
+    }
+
+    const legacySourceCard = await store.create(
+      { workspace: '/tmp/repo-a', title: 'legacy card without sources', kind: 'idea', sessionId: 'sess-legacy' },
+      () => 1_800_000_200_800,
+    )
+    const legacySourceFull = projectFull(store.get(legacySourceCard.id))
+    checkEqual('legacy origin projects as s0', legacySourceFull.sources[0]?.sid, 's0')
+    checkEqual('legacy origin source points at the session', legacySourceFull.sources[0]?.where?.sessionId, 'sess-legacy')
+    checkEqual('legacy synthesis is not written back', (store.get(legacySourceCard.id).sources ?? []).length, 0)
+    await store.remove(legacySourceCard.id)
 
     console.log('\nverbatim developer request')
     const requestSession = {
@@ -582,6 +649,14 @@ async function main() {
     checkOutput(readTool, readWithRequest, 'todo_read with request')
     checkOutput(readTool, await readTool.execute({ id: captured.id, part: 'notes' }, exec), 'todo_read notes')
     checkOutput(readTool, await readTool.execute({ id: captured.id, part: 'park:1' }, exec), 'todo_read park')
+    checkEqual('read card carries source pointers', card.sources.length, SOURCE_LIMIT)
+    check('read sources carry no body text', card.sources.every((source) => !Object.hasOwn(source, 'text')), JSON.stringify(card.sources))
+    const sourcesShape = await readTool.execute({ id: captured.id, part: 'sources' }, exec)
+    checkOutput(readTool, sourcesShape, 'todo_read sources')
+    checkEqual('read sources lists pointers', [sourcesShape.shape, sourcesShape.sources.length], ['sources', SOURCE_LIMIT])
+    const oneSourceShape = await readTool.execute({ id: captured.id, part: 'source:s1' }, exec)
+    checkOutput(readTool, oneSourceShape, 'todo_read source')
+    checkEqual('read resolves one source', [oneSourceShape.shape, oneSourceShape.source.sid], ['source', 's1'])
 
     const notesShape = await readTool.execute({ id: captured.id, part: 'notes' }, exec)
     checkEqual('read notes shape is empty before any note', [notesShape.shape, notesShape.notesCount], ['notes', 0])
@@ -598,6 +673,7 @@ async function main() {
     await readRejects('unknown card is rejected', { id: 'td_nope' }, 'todo/not-found')
     await readRejects('park out of range is rejected', { id: captured.id, part: 'park:9' }, 'todo/park-missing')
     await readRejects('unknown part is rejected', { id: captured.id, part: 'body' }, 'todo/invalid-part')
+    await readRejects('unknown source is rejected', { id: captured.id, part: 'source:nope' }, 'todo/source-missing')
 
     const appended = await noteTool.execute({ id: captured.id, text: '其实 rotate() 是异步的', kind: 'evidence' }, exec)
     checkOutput(noteTool, appended, 'todo_note')
@@ -606,6 +682,12 @@ async function main() {
     checkEqual('note records its source session', [storedNote.fromSession, storedNote.turn], ['sess-tool', 3])
     const notesAfter = await readTool.execute({ id: captured.id, part: 'notes' }, exec)
     checkEqual('notes are readable in order', notesAfter.notes.map((note) => note.text), ['其实 rotate() 是异步的'])
+    const sourcedNote = await noteTool.execute({ id: captured.id, text: '这条笔记引用了早前来源', kind: 'evidence', basis: 'verified', role: 'decision', sourceIds: ['s1', 's1', ''] }, exec)
+    checkOutput(noteTool, sourcedNote, 'todo_note with sourceIds')
+    checkEqual('note source ids are deduplicated and trimmed', sourcedNote.sourceIds, ['s1'])
+    checkEqual('note basis and role are kept', [sourcedNote.basis, sourcedNote.role], ['verified', 'decision'])
+    checkEqual('stored note keeps its source ids', store.get(captured.id).notes[1].sourceIds, ['s1'])
+    checkEqual('stored note keeps basis and role', [store.get(captured.id).notes[1].basis, store.get(captured.id).notes[1].role], ['verified', 'decision'])
     try {
       await noteTool.execute({ id: captured.id, text: '字'.repeat(301) }, exec)
       check('note over 300 characters is rejected', false, 'no rejection')
@@ -711,20 +793,25 @@ async function main() {
       events: [
         { type: 'turn/start', seq: 1, data: { turn: 1 } },
         // `user/message` stores the message AS its data (no `message` wrapper).
-        { type: 'user/message', seq: 2, data: { role: 'user', content: [{ type: 'text', text: '帮我看看刷新 token 后 401 的问题' }] } },
+        { type: 'user/message', seq: 2, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '帮我看看刷新 token 后 401 的问题' }] } },
         { type: 'assistant/message', seq: 3, data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: '先确认 refresh 的实现\n然后看 rotate 调用点' }] } } },
         { type: 'tool/call', seq: 4, data: { turn: 1, step: 1, name: 'read', arguments: '{}' } },
         { type: 'tool/result', seq: 5, data: { turn: 1, message: { role: 'tool', content: [{ type: 'text', text: 'refresh() 直接返回旧 token' }] } } },
         { type: 'turn/start', seq: 6, data: { turn: 2 } },
-        { type: 'user/message', seq: 7, data: { role: 'user', content: [{ type: 'text', text: '继续' }] } },
+        { type: 'user/message', seq: 7, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] } },
       ],
     }
+    const approval = recallApprovalDecision({ name: 'todo_recall', arguments: { id: '3.2', sourceId: 's1', slice: [2, 3], gap: 'missing decision', reason: 'needed now' } })
+    checkEqual('recall asks for approval', approval.kind, 'ask')
+    check('approval names card, source, slice, gap and reason', approval.reason.includes('3.2') && approval.reason.includes('s1') && approval.reason.includes('2..3') && approval.reason.includes('missing decision') && approval.reason.includes('needed now'), approval.reason)
+    checkEqual('non-recall tools delegate', recallApprovalDecision({ name: 'todo_add' }), undefined)
     const recall = createRecall({
       readSession: async (sessionId) => {
-        if (sessionId !== 'sess-recall') throw new Error('unknown session')
+        if (sessionId !== 'sess-recall' && sessionId !== 'sess-earlier') throw new Error('unknown session')
         return fakeLog
       },
       estimateTokens: () => 42,
+      readSurface: async () => ({ events: [{ seq: 2 }] }),
     })
     const recallTool = createTodoRecallTool({ defineTool, store, recall })
     const manifestOrigin = { sessionId: 'sess-recall', turn: 1, seqRange: [1, 5], cwd: '/tmp/repo-a', at: 1 }
@@ -737,13 +824,43 @@ async function main() {
     checkEqual('manifest previews the first line', manifest.entries[0].preview, '帮我看看刷新 token 后 401 的问题')
     checkEqual('manifest carries token estimates', manifest.entries[0].tokens, 42)
     checkEqual('manifest sums tokens', manifest.tokens, 126)
+    checkEqual('manifest marks surface-visible entries', manifest.entries.map((entry) => entry.visible ?? false), [true, false, false])
+    checkEqual('manifest reports surface stats', [manifest.stats.surfaceKnown, manifest.stats.surfaceVisible], [true, 1])
+    checkEqual('manifest does not stop while a gap remains', manifest.stop, false)
+    const visibleOnly = await recall.manifest({ sessionId: 'sess-recall', seqRange: [2, 2] })
+    checkEqual('manifest stops when every entry is visible', visibleOnly.stop, true)
     const body = await recallTool.execute({ id: captured.id, slice: [2, 3] })
     checkEqual('body shape and slice', [body.shape, body.slice], ['body', [2, 3]])
     checkOutput(recallTool, body, 'todo_recall body')
-    checkEqual('body returns the two messages', body.entries.map((entry) => entry.seq), [2, 3])
-    check('body keeps multi-line text', body.entries[1].text.includes('\n'), body.entries[1].text)
+    checkEqual('body skips the already-visible message', body.entries.map((entry) => entry.seq), [3])
+    checkEqual('body reports the skipped duplicate', body.stats.duplicatesSkipped, 1)
+    check('body keeps multi-line text', body.entries[0].text.includes('\n'), body.entries[0].text)
+    const allVisibleBody = await recallTool.execute({ id: captured.id, slice: [2, 2] })
+    checkEqual('all-visible body stops without reading', [allVisibleBody.shape, allVisibleBody.stop], ['unavailable', true])
+    checkEqual('all-visible body reports the duplicate', allVisibleBody.stats.duplicatesSkipped, 1)
+    checkOutput(recallTool, allVisibleBody, 'todo_recall all-visible body')
     const emptySlice = await recallTool.execute({ id: captured.id, slice: [4, 4] })
     checkEqual('a slice with no messages is unavailable', emptySlice.shape, 'unavailable')
+    const sourcedManifest = await recallTool.execute({ id: captured.id, sourceId: 's1' })
+    checkEqual('a selected source is used for the manifest', [sourcedManifest.shape, sourcedManifest.sourceId, sourcedManifest.total], ['manifest', 's1', 4])
+    checkOutput(recallTool, sourcedManifest, 'todo_recall source manifest')
+    checkEqual('manifest reports its stats', [sourcedManifest.stats.messages, sourcedManifest.stats.batch, sourcedManifest.stats.duplicatesSkipped], [4, 0, 0])
+    const fileSourceManifest = await recallTool.execute({ id: captured.id, sourceId: 's2' })
+    checkEqual('a file source has no body to recall', [fileSourceManifest.shape, fileSourceManifest.available], ['unavailable', false])
+    const unknownSourceManifest = await recallTool.execute({ id: captured.id, sourceId: 'nope' })
+    checkEqual('an unknown source is unavailable', [unknownSourceManifest.shape, unknownSourceManifest.available], ['unavailable', false])
+    const batch = await recall.firstBatch({ sessionId: 'sess-recall', seqRange: [1, 7] })
+    checkEqual('first batch uses the earliest effective turns', batch.turns, [1, 2])
+    checkEqual('first batch includes only those turns', batch.entries.map((entry) => entry.seq), [2, 3, 5, 7])
+    checkEqual('first batch reports stats', [batch.stats.batch, batch.stats.duplicatesSkipped], [1, 0])
+    const batchCurrent = await recall.firstBatch({ sessionId: 'sess-recall', seqRange: [1, 7] }, { currentTurn: 2 })
+    checkEqual('first batch excludes the current turn', batchCurrent.entries.map((entry) => entry.seq), [2, 3, 5])
+    const toolBatch = await recallTool.execute({ id: captured.id, mode: 'first-batch' })
+    checkEqual('todo_recall first-batch shape', [toolBatch.shape, toolBatch.sourceId, toolBatch.turns], ['first-batch', 'origin', [1]])
+    checkOutput(recallTool, toolBatch, 'todo_recall first batch')
+    const sourcedBatch = await recallTool.execute({ id: captured.id, mode: 'first-batch', sourceId: 's1' })
+    checkEqual('todo_recall first-batch reads the selected source', [sourcedBatch.shape, sourcedBatch.sourceId, sourcedBatch.turns], ['first-batch', 's1', [1, 2]])
+    checkOutput(recallTool, sourcedBatch, 'todo_recall sourced first batch')
     const noOrigin = await tool.execute({ ...base, title: 'no origin card', kind: 'defect' }, exec)
     const noOriginCard = { ...store.get(noOrigin.id), origin: undefined }
     await store.put(noOriginCard)

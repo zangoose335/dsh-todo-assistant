@@ -24,6 +24,7 @@ import { createDetector } from './detect.js'
 import { createMarkerQueue, messageText } from './marker.js'
 import { INBOX, createTodoSpec } from './domain.js'
 import { readCodeCoordinates } from './git.js'
+import { recallApprovalDecision } from './approval.js'
 import { createRecall } from './recall.js'
 import {
   createTodoAddTool,
@@ -177,6 +178,13 @@ export async function apply(ctx) {
       if (query === undefined) throw new Error('sessionQuery is not mounted in this composition')
       return query.readSession(sessionId)
     },
+    readSurface: (sessionId) => {
+      const query = ctx.get('sessionQuery')
+      if (query === undefined || typeof query.readSurface !== 'function') {
+        throw new Error('sessionQuery.readSurface is not mounted in this composition')
+      }
+      return query.readSurface(sessionId)
+    },
     estimateTokens: (message) => ctx.get('tokenMeter')?.estimateMessage(message),
   })
 
@@ -197,8 +205,15 @@ export async function apply(ctx) {
 
   ctx.inject(['tools'], (toolCtx) => {
     toolCtx.effect(() => {
+      // Every recall call asks; ToolRuntime resolves the ask through the
+      // approval service (allowed-once only) and fails closed otherwise.
+      const disposeApproval = toolCtx.on('tools/pre-execute', (exec, next) => {
+        const decision = recallApprovalDecision(exec)
+        return decision === undefined ? next() : decision
+      })
       const disposers = tools.map((definition) => toolCtx.tools.register(definition))
       return () => {
+        disposeApproval()
         for (const dispose of disposers) dispose()
       }
     }, 'todo-assistant: todo tools')

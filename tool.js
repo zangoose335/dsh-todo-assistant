@@ -10,6 +10,7 @@
  * the offline harness can build the same definition against a real store.
  */
 import { findDuplicate } from './dedupe.js'
+import { filesFromToolCall } from './detect.js'
 import { BRIEF_BASES, BRIEF_IMPACTS, BRIEF_LIMITS } from './brief.js'
 import { CAPTURE_LIMITS, STATUSES, TodoInputError, assembleCapture, labelOf, mintId, normalizeTouchedPath, projectFull } from './domain.js'
 import { extractTodoBlocks } from './marker.js'
@@ -55,6 +56,28 @@ export function currentTurn(session) {
     // Fall through to the unknown-turn answer.
   }
   return 0
+}
+
+/**
+ * Files this turn actually read/wrote/edited/searched. Only used to mark
+ * already-mentioned paths as observed; never auto-added to a card.
+ */
+function observedFilesFor(session, cwd, turn) {
+  const files = new Set()
+  try {
+    const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : []
+    let current = 0
+    for (const event of events) {
+      if (event?.type === 'turn/start' && Number.isInteger(event.data?.turn)) current = event.data.turn
+      if (event?.type !== 'tool/call') continue
+      const eventTurn = Number.isInteger(event.data?.turn) ? event.data.turn : current
+      if (Number.isInteger(turn) && turn > 0 && eventTurn !== turn) continue
+      for (const file of filesFromToolCall(event.data?.name, event.data?.arguments, cwd)) files.add(file)
+    }
+  } catch {
+    // A missing snapshot only means nothing is observed.
+  }
+  return files
 }
 
 /**
@@ -287,6 +310,8 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
             label: { type: 'string', required: true, description: 'One line naming the fact.' },
             text: { type: 'string', required: true, description: 'The fact itself, not a summary of the discussion.' },
             where: whereSchema(false),
+            basis: { type: 'string', enum: BRIEF_BASES, description: 'Optional BriefBasis for this fact.' },
+            sourceIds: { type: 'array', items: { type: 'string' }, description: 'Optional existing source sids for this fact.' },
           },
         },
       },
@@ -325,6 +350,8 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
             label: { type: 'string', required: true, description: 'What this is.' },
             why: { type: 'string', required: true, description: 'Why it might matter.' },
             where: whereSchema(true),
+            basis: { type: 'string', enum: BRIEF_BASES, description: 'Optional BriefBasis for this pointer.' },
+            sourceIds: { type: 'array', items: { type: 'string' }, description: 'Optional existing source sids for this pointer.' },
           },
         },
       },
@@ -441,6 +468,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
               : ''
       const origin = originOf(session, agent.id, cwd, now(), rootSessionId)
       const requestResult = requestOf(session, now, store, args?.requestExcerpt)
+      const observedFiles = observedFilesFor(session, cwd, origin.turn)
       const { record, warnings: captureWarnings } = assembleCapture(args, {
         now,
         nextId: () => mintId((id) => store.has(id)),
@@ -448,6 +476,7 @@ export function createTodoAddTool({ defineTool, store, now = Date.now, readGit, 
         code,
         workspace,
         request: requestResult.request,
+        observedFiles,
       })
       const warnings = requestResult.warning === undefined ? captureWarnings : [...captureWarnings, requestResult.warning]
       const stored = await store.put(record)
@@ -493,12 +522,13 @@ export function createTodoReadTool({ defineTool, store }) {
       'Read one card: its task brief (goal, why, confirmed facts/decisions, constraints, leads, next action, open questions), then the few must-read facts, parked references, and code coordinates.',
       'Call it when the developer names a card (a short label like #3.2, or the td_ id) or asks you to work on one. Reading costs context, so read the card before the parked references, and only open a parked pointer when its label plus why suggests it is needed.',
       'Parked references are pointers, not content: their bodies are only reachable later through a read-back the developer approves.',
+      "Sources are also pointers: read part='sources' for the list, or part='source:<sid>' for one pointer; never a body.",
     ].join(' '),
     parameters: {
       id: { type: 'string', required: true, description: 'Card label like 3.2 or #3.2, or the td_ id.' },
       part: {
         type: 'string',
-        description: "Omit for the card itself. 'notes' for the appended notes; 'park:<n>' (1-based) for one parked pointer including where it points.",
+        description: "Omit for the card itself. 'notes' for notes; 'park:<n>' for one parked pointer; 'sources' for source pointers; 'source:<sid>' for one source.",
       },
     },
     output: {
@@ -506,7 +536,7 @@ export function createTodoReadTool({ defineTool, store }) {
         type: 'object',
         additionalProperties: false,
         properties: {
-          shape: { type: 'string', required: true, enum: ['card', 'notes', 'park'] },
+          shape: { type: 'string', required: true, enum: ['card', 'notes', 'park', 'sources', 'source'] },
           id: { type: 'string', required: true },
           label: { type: 'string' },
           title: { type: 'string' },
@@ -525,6 +555,8 @@ export function createTodoReadTool({ defineTool, store }) {
           notes: { type: 'json' },
           origin: { type: 'json' },
           request: { type: 'json' },
+          sources: { type: 'json' },
+          source: { type: 'json' },
           index: { type: 'integer' },
           pointer: { type: 'json' },
         },
@@ -533,7 +565,8 @@ export function createTodoReadTool({ defineTool, store }) {
         if (value.shape === 'notes') {
           const lines = [`#${value.label ?? value.id}「${value.title}」 notes (${value.notesCount}):`]
           for (const [index, note] of (value.notes ?? []).entries()) {
-            lines.push(`${index + 1}. [${note.kind}] ${note.text}`)
+            const tags = [note.basis, note.role, (note.sourceIds ?? []).length === 0 ? undefined : `sources ${note.sourceIds.join(', ')}`].filter(Boolean)
+            lines.push(`${index + 1}. [${note.kind}] ${note.text}${tags.length === 0 ? '' : ` [${tags.join('; ')}]`}`)
           }
           if (lines.length === 1) lines.push('(none)')
           return [{ type: 'text', text: lines.join('\n') }]
@@ -542,6 +575,24 @@ export function createTodoReadTool({ defineTool, store }) {
           const pointer = value.pointer ?? {}
           const lines = [`#${value.label ?? value.id} parked ${value.index}: ${pointer.label ?? ''} — ${pointer.why ?? ''}`]
           if (pointer.where !== undefined) lines.push(`where: ${JSON.stringify(pointer.where)}`)
+          return [{ type: 'text', text: lines.join('\n') }]
+        }
+        if (value.shape === 'sources') {
+          const sources = value.sources ?? []
+          const lines = [`#${value.label ?? value.id}「${value.title}」 sources (${sources.length}):`]
+          for (const source of sources) {
+            lines.push(`${source.sid}\t[${source.kind}] ${source.label}${source.where === undefined ? '' : ` — ${JSON.stringify(source.where)}`}`)
+          }
+          if (lines.length === 1) lines.push('(none)')
+          return [{ type: 'text', text: lines.join('\n') }]
+        }
+        if (value.shape === 'source') {
+          const source = value.source ?? {}
+          const lines = [`#${value.label ?? value.id} source ${source.sid}: [${source.kind}] ${source.label}`]
+          if (source.purpose !== undefined) lines.push(`purpose: ${source.purpose}`)
+          if (source.where !== undefined) lines.push(`where: ${JSON.stringify(source.where)}`)
+          if (source.turnRange !== undefined) lines.push(`turns: ${source.turnRange[0]}..${source.turnRange[1]}`)
+          lines.push(`origin: ${source.origin}; verified: ${source.verified}`)
           return [{ type: 'text', text: lines.join('\n') }]
         }
         const lines = [`#${value.label ?? value.id}「${value.title}」 ${value.status}/${value.kind} in ${value.workspace}`]
@@ -574,9 +625,18 @@ export function createTodoReadTool({ defineTool, store }) {
           if (core.intent !== undefined) lines.push(`intent (legacy): ${core.intent}`)
         }
         for (const [index, item] of (value.mustRead ?? []).entries()) {
-          lines.push(`must-read ${index + 1}. ${item.label}: ${item.text}`)
+          const observed = item.observed === true ? 'observed' : item.observed === false ? 'unverified' : undefined
+          const tags = [item.basis, observed, (item.sourceIds ?? []).length === 0 ? undefined : `sources ${item.sourceIds.join(', ')}`].filter(Boolean)
+          lines.push(`must-read ${index + 1}. ${item.label}: ${item.text}${tags.length === 0 ? '' : ` [${tags.join('; ')}]`}`)
         }
-        for (const item of value.park ?? []) lines.push(`parked: ${item.label} — ${item.why}`)
+        for (const item of value.park ?? []) {
+          const observed = item.observed === true ? 'observed' : item.observed === false ? 'unverified' : undefined
+          const tags = [item.basis, observed, (item.sourceIds ?? []).length === 0 ? undefined : `sources ${item.sourceIds.join(', ')}`].filter(Boolean)
+          lines.push(`parked: ${item.label} — ${item.why}${tags.length === 0 ? '' : ` [${tags.join('; ')}]`}`)
+        }
+        for (const source of value.sources ?? []) {
+          lines.push(`source ${source.sid}: [${source.kind}] ${source.label}${source.where === undefined ? '' : ` — ${JSON.stringify(source.where)}`}`)
+        }
         if ((value.touchedFiles ?? []).length > 0) lines.push(`files: ${value.touchedFiles.join(', ')}`)
         const code = value.code ?? {}
         if (code.commit !== undefined && code.commit !== '') lines.push(`commit: ${code.commit} (${code.branch || 'detached'})`)
@@ -615,6 +675,7 @@ export function createTodoReadTool({ defineTool, store }) {
           notesCount: full.notes.length,
           origin: full.origin,
           request: full.request,
+          sources: full.sources,
         }
       }
       if (part === 'notes') {
@@ -629,7 +690,16 @@ export function createTodoReadTool({ defineTool, store }) {
         const pointer = full.park[index - 1]
         return { shape: 'park', id: full.id, label: full.label, index, pointer }
       }
-      throw new TodoInputError('todo/invalid-part', "part must be 'notes' or 'park:<n>'")
+      if (part === 'sources') {
+        return { shape: 'sources', id: full.id, label: full.label, title: full.title, sources: full.sources }
+      }
+      const sourcePart = /^source:(.+)$/u.exec(part)
+      if (sourcePart !== null) {
+        const source = full.sources.find((item) => item.sid === sourcePart[1])
+        if (source === undefined) throw new TodoInputError('todo/source-missing', `no source ${sourcePart[1]} on card #${full.label ?? full.id}`)
+        return { shape: 'source', id: full.id, label: full.label, title: full.title, source }
+      }
+      throw new TodoInputError('todo/invalid-part', "part must be 'notes', 'park:<n>', 'sources', or 'source:<sid>'")
     },
   })
 }
@@ -656,6 +726,13 @@ export function createTodoNoteTool({ defineTool, store, now = Date.now }) {
         enum: ['supplement', 'evidence', 'status'],
         description: 'supplement (default): new context; evidence: a concrete observation; status: a state change.',
       },
+      basis: { type: 'string', enum: BRIEF_BASES, description: 'Optional BriefBasis for this note.' },
+      role: { type: 'string', description: 'Optional role, e.g. doc/code/decision.' },
+      sourceIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional existing source sids this note cites; does not read history.',
+      },
     },
     output: {
       schema: {
@@ -668,6 +745,9 @@ export function createTodoNoteTool({ defineTool, store, now = Date.now }) {
           notesCount: { type: 'integer', required: true },
           kind: { type: 'string', required: true },
           text: { type: 'string', required: true },
+          basis: { type: 'string' },
+          role: { type: 'string' },
+          sourceIds: { type: 'json' },
         },
       },
       render: (_args, value) => [
@@ -687,10 +767,21 @@ export function createTodoNoteTool({ defineTool, store, now = Date.now }) {
       const sessionId = typeof exec?.agent?.id === 'string' ? exec.agent.id : ''
       const updated = await store.addNote(
         record.id,
-        { text, kind: args?.kind, fromSession: sessionId, turn: currentTurn(session) },
+        { text, kind: args?.kind, fromSession: sessionId, turn: currentTurn(session), basis: args?.basis, role: args?.role, sourceIds: args?.sourceIds },
         now,
       )
-      return { id: updated.id, label: labelOf(updated).label, title: updated.title, notesCount: updated.notes.length, kind: args?.kind ?? 'supplement', text }
+      const storedNote = updated.notes.at(-1)
+      return {
+        id: updated.id,
+        label: labelOf(updated).label,
+        title: updated.title,
+        notesCount: updated.notes.length,
+        kind: args?.kind ?? 'supplement',
+        text,
+        ...(storedNote?.basis === undefined ? {} : { basis: storedNote.basis }),
+        ...(storedNote?.role === undefined ? {} : { role: storedNote.role }),
+        ...(storedNote?.sourceIds === undefined ? {} : { sourceIds: storedNote.sourceIds }),
+      }
     },
   })
 }
@@ -773,11 +864,21 @@ export function createTodoRecallTool({ defineTool, store, recall }) {
     description: [
       'Read the original session content behind a card: the events it was captured from, which are not stored on the card itself.',
       'HARD RULE: never call this on your own initiative. The returned text stays in context and is paid for on every later step, so ask the developer first and name the card you want to read back.',
-      'Call it WITHOUT slice first: it returns a cheap manifest (seq, turn, role, first line, token estimate) of the captured range. Then, with the developer, pick one slice and call it again WITH that slice to get the text.',
+      'Call it WITHOUT slice first: it returns a cheap manifest (seq, turn, role, first line, token estimate) of the selected source. Then, with the developer, pick one slice and call it again WITH that slice to get the text.',
+      'The default source is the card origin; use sourceId to read another source pointer returned by todo_read.',
+      'First check what is already visible; pass gap (what is missing) and reason (why it must be read now). mode="first-batch" reads the earliest effective human turns, not the most recent messages. Stop as soon as the gap is resolved.',
       'Prefer what the card and its notes already say; recall is the fallback for content lost to compaction.',
     ].join(' '),
     parameters: {
       id: { type: 'string', required: true, description: 'Card label like 3.2 or #3.2, or the td_ id.' },
+      sourceId: { type: 'string', description: "Optional source sid from todo_read (e.g. s0). Omit for the card's origin." },
+      gap: { type: 'string', description: 'What information is missing and why the current visible context is insufficient.' },
+      reason: { type: 'string', description: 'Why this read is needed now; used in the approval prompt.' },
+      mode: {
+        type: 'string',
+        enum: ['manifest', 'body', 'first-batch'],
+        description: 'manifest (default) / body (requires slice) / first-batch (earliest effective human turns).',
+      },
       slice: {
         type: 'array',
         items: { type: 'integer' },
@@ -789,35 +890,41 @@ export function createTodoRecallTool({ defineTool, store, recall }) {
         type: 'object',
         additionalProperties: false,
         properties: {
-          shape: { type: 'string', required: true, enum: ['manifest', 'body', 'unavailable'] },
+          shape: { type: 'string', required: true, enum: ['manifest', 'body', 'first-batch', 'unavailable'] },
           id: { type: 'string', required: true },
           label: { type: 'string' },
           available: { type: 'boolean', required: true },
           reason: { type: 'string' },
+          sourceId: { type: 'string' },
+          sources: { type: 'json' },
           sessionId: { type: 'string' },
           range: { type: 'json' },
           total: { type: 'integer' },
           tokens: { type: 'integer' },
           entries: { type: 'json' },
           slice: { type: 'json' },
+          turns: { type: 'json' },
           truncated: { type: 'boolean' },
+          stop: { type: 'boolean' },
+          stats: { type: 'json' },
         },
       },
       render: (_args, value) => {
         if (value.shape === 'unavailable') {
           return [{ type: 'text', text: `#${value.label ?? value.id}: nothing to read back (${value.reason ?? 'unavailable'}).` }]
         }
-        if (value.shape === 'manifest') {
+        if (value.shape === 'manifest' || value.shape === 'first-batch') {
           const lines = [
-            `#${value.label ?? value.id} captures ${value.total} message(s) in seq ${value.range[0]}..${value.range[1]} (~${value.tokens} tokens):`,
+            `#${value.label ?? value.id} source ${value.sourceId ?? 'origin'} ${value.shape === 'first-batch' ? `first batch (turns ${(value.turns ?? []).join(', ')})` : `captures ${value.total} message(s)`} in seq ${value.range[0]}..${value.range[1]} (~${value.tokens} tokens):`,
           ]
           for (const entry of value.entries ?? []) {
-            lines.push(`${entry.seq}\t[${entry.role}] turn ${entry.turn}\t~${entry.tokens}t\t${entry.preview}`)
+            lines.push(`${entry.seq}\t[${entry.role}] turn ${entry.turn}\t~${entry.tokens}t${entry.visible === true ? '\t[visible]' : ''}\t${entry.preview}`)
           }
-          lines.push('Ask the developer which slice to read, then call again with slice=[from, to].')
+          if (value.stop === true) lines.push('All requested messages are already in the current model surface; stop and use the visible context.')
+          else lines.push('Ask the developer which slice to read, then call again with slice=[from, to].')
           return [{ type: 'text', text: lines.join('\n') }]
         }
-        const lines = [`#${value.label ?? value.id} seq ${value.slice[0]}..${value.slice[1]}:`]
+        const lines = [`#${value.label ?? value.id} source ${value.sourceId ?? 'origin'} seq ${value.slice[0]}..${value.slice[1]}:`]
         for (const entry of value.entries ?? []) {
           lines.push(`\n[seq ${entry.seq} · ${entry.role} · turn ${entry.turn}]\n${entry.text}`)
         }
@@ -825,19 +932,71 @@ export function createTodoRecallTool({ defineTool, store, recall }) {
         return [{ type: 'text', text: lines.join('\n') }]
       },
     },
-    async execute(args) {
+    async execute(args, exec) {
       const id = typeof args?.id === 'string' ? args.id : ''
       const record = store.findRef(id)
       if (record === undefined) throw new TodoInputError('todo/not-found', `no card #${id}`)
-      const origin = record.origin
-      if (Array.isArray(args?.slice)) {
-        const result = await recall.body(origin, args.slice)
-        if (result.available !== true) return { shape: 'unavailable', id, label: labelOf(record).label, available: false, reason: result.reason }
-        return { shape: 'body', id, label: labelOf(record).label, available: true, ...result }
+      const full = projectFull(record)
+      const sources = full.sources
+      const requestedSourceId = typeof args?.sourceId === 'string' ? args.sourceId.trim() : ''
+      let target
+      let sourceId = 'origin'
+      if (requestedSourceId !== '') {
+        target = sources.find((source) => source.sid === requestedSourceId)
+        if (target === undefined) {
+          return {
+            shape: 'unavailable',
+            id,
+            label: labelOf(record).label,
+            available: false,
+            reason: `source ${requestedSourceId} is not on this card`,
+            sourceId: requestedSourceId,
+            sources,
+          }
+        }
+        sourceId = target.sid
+      } else if (record.origin !== undefined) {
+        target = record.origin
+      } else {
+        target = sources.find((source) => source.kind === 'session' && typeof source.where?.sessionId === 'string')
+        if (target === undefined) {
+          return {
+            shape: 'unavailable',
+            id,
+            label: labelOf(record).label,
+            available: false,
+            reason: 'this card has no origin session or session source',
+            sources,
+          }
+        }
+        sourceId = target.sid
       }
-      const result = await recall.manifest(origin)
-      if (result.available !== true) return { shape: 'unavailable', id, label: labelOf(record).label, available: false, reason: result.reason, range: result.range, sessionId: result.sessionId }
-      return { shape: 'manifest', id, label: labelOf(record).label, available: true, ...result }
+      const mode = typeof args?.mode === 'string' ? args.mode.trim() : ''
+      if (mode === 'first-batch') {
+        const result = await recall.firstBatch(target, { currentTurn: currentTurn(exec?.agent?.session) })
+        if (result.available !== true) return { shape: 'unavailable', id, label: labelOf(record).label, available: false, reason: result.reason, sourceId, sources, range: result.range, sessionId: result.sessionId }
+        return { shape: 'first-batch', id, label: labelOf(record).label, available: true, sourceId, sources, ...result }
+      }
+      if (Array.isArray(args?.slice)) {
+        const result = await recall.body(target, args.slice)
+        if (result.available !== true) return { shape: 'unavailable', id, label: labelOf(record).label, available: false, reason: result.reason, sourceId, sources, stop: result.stop, stats: result.stats }
+        return { shape: 'body', id, label: labelOf(record).label, available: true, sourceId, sources, ...result }
+      }
+      const result = await recall.manifest(target)
+      if (result.available !== true) {
+        return {
+          shape: 'unavailable',
+          id,
+          label: labelOf(record).label,
+          available: false,
+          reason: result.reason,
+          sourceId,
+          sources,
+          range: result.range,
+          sessionId: result.sessionId,
+        }
+      }
+      return { shape: 'manifest', id, label: labelOf(record).label, available: true, sourceId, sources, ...result }
     },
   })
 }
