@@ -10,9 +10,11 @@
  *   request  POST /todo-assistant/<endpoint> with the Connection RPC envelope
  *   result   `{ ok: true, value }` or `{ ok: false, error: { code, message, details } }`
  */
+import { BRIEF_BASES } from './brief.js'
 import {
   INBOX,
   NOTE_KINDS,
+  SOURCE_LIMIT,
   TodoInputError,
   applyPatch,
   buildRecord,
@@ -28,6 +30,63 @@ export const CHANNEL = '/todo-assistant'
 const NOTE_LIMIT = 200
 /** A single note is a sentence or two, never a summary. */
 const NOTE_TEXT_LIMIT = 300
+
+/** Source pointer field caps; sources carry pointers, not bodies. */
+const SOURCE_SID_LIMIT = 80
+const SOURCE_KIND_LIMIT = 40
+const SOURCE_LABEL_LIMIT = 120
+const SOURCE_PURPOSE_LIMIT = 200
+
+/** Keep only the pointer-shaped `where` fields; drop empty/unknown fields. */
+function normalizeSourceWhere(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const where = {}
+  if (typeof input.sessionId === 'string' && input.sessionId.trim() !== '') where.sessionId = input.sessionId.trim()
+  if (Array.isArray(input.seqRange) && input.seqRange.length === 2 && input.seqRange.every(Number.isInteger)) {
+    where.seqRange = [input.seqRange[0], input.seqRange[1]]
+  }
+  if (typeof input.file === 'string' && input.file.trim() !== '') where.file = input.file.trim()
+  return Object.keys(where).length === 0 ? undefined : where
+}
+
+/** Normalize one source pointer; reject an empty sid/kind/label. */
+function normalizeSource(input, at) {
+  const sid = typeof input?.sid === 'string' ? input.sid.trim().slice(0, SOURCE_SID_LIMIT) : ''
+  if (sid === '') throw new TodoInputError('todo/source-sid-required', 'source.sid 不能为空')
+  const kind = typeof input?.kind === 'string' ? input.kind.trim().slice(0, SOURCE_KIND_LIMIT) : ''
+  if (kind === '') throw new TodoInputError('todo/source-kind-required', 'source.kind 不能为空')
+  const label = typeof input?.label === 'string' ? input.label.trim().slice(0, SOURCE_LABEL_LIMIT) : ''
+  if (label === '') throw new TodoInputError('todo/source-label-required', 'source.label 不能为空')
+  const purpose = typeof input?.purpose === 'string' && input.purpose.trim() !== ''
+    ? input.purpose.trim().slice(0, SOURCE_PURPOSE_LIMIT)
+    : undefined
+  const where = normalizeSourceWhere(input?.where)
+  const turnRange = Array.isArray(input?.turnRange) && input.turnRange.length === 2 && input.turnRange.every(Number.isInteger)
+    ? [input.turnRange[0], input.turnRange[1]]
+    : undefined
+  const origin = ['stated', 'captured', 'derived'].includes(input?.origin) ? input.origin : 'stated'
+  return {
+    sid,
+    kind,
+    label,
+    ...(purpose === undefined ? {} : { purpose }),
+    ...(where === undefined ? {} : { where }),
+    ...(turnRange === undefined ? {} : { turnRange }),
+    origin,
+    verified: input?.verified === true,
+    at: Number.isInteger(input?.at) ? input.at : at,
+  }
+}
+
+/** Stable identity for source dedupe: kind + where + seqRange. */
+function sourceKey(source) {
+  return JSON.stringify([
+    source.kind,
+    source.where?.sessionId ?? '',
+    source.where?.seqRange ?? [],
+    source.where?.file ?? '',
+  ])
+}
 
 /** Wrap any thrown value as a wire failure. */
 function failure(code, message) {
@@ -198,6 +257,40 @@ export function createStore(domain) {
       return next
     },
 
+    /**
+     * Append one source pointer to a card. Duplicate kind+where+seqRange
+     * pointers are ignored; `updatedAt` is intentionally unchanged.
+     *
+     * @param id - card id.
+     * @param input - source pointer fields.
+     * @param now - clock override.
+     * @returns the current record (with the source when appended).
+     */
+    async addSource(id, input, now) {
+      const current = requireRecord(table.get(id))
+      const source = normalizeSource(input, now())
+      const key = sourceKey(source)
+      if ((current.sources ?? []).some((existing) => sourceKey(existing) === key)) return current
+      if ((current.sources ?? []).length >= SOURCE_LIMIT) {
+        throw new TodoInputError('todo/source-limit', `sources 已达上限 ${SOURCE_LIMIT} 条`)
+      }
+      return await table.update(id, (latest) => {
+        const sources = latest.sources ?? []
+        if (sources.some((existing) => sourceKey(existing) === key)) return latest
+        if (sources.length >= SOURCE_LIMIT) {
+          throw new TodoInputError('todo/source-limit', `sources 已达上限 ${SOURCE_LIMIT} 条`)
+        }
+        return { ...latest, sources: [...sources, source] }
+      })
+    },
+
+    /** Find one source pointer on a card, or undefined. */
+    findSource(id, sid) {
+      const record = table.get(id)
+      if (record === undefined) return undefined
+      return (record.sources ?? []).find((source) => source.sid === sid)
+    },
+
     /** Apply a manual edit and durably store the result. */
     async update(id, patch, now) {
       const current = requireRecord(table.get(id))
@@ -254,12 +347,20 @@ export function createStore(domain) {
         throw new TodoInputError('todo/note-limit', `note 已达上限 ${NOTE_LIMIT} 条`)
       }
       const kind = NOTE_KINDS.includes(input?.kind) ? input.kind : 'supplement'
+      const sourceIds = Array.isArray(input?.sourceIds)
+        ? [...new Set(input.sourceIds.filter((sid) => typeof sid === 'string' && sid.trim() !== '').map((sid) => sid.trim()))].slice(0, 32)
+        : []
+      const basis = typeof input?.basis === 'string' && BRIEF_BASES.includes(input.basis) ? input.basis : undefined
+      const role = typeof input?.role === 'string' && input.role.trim() !== '' ? input.role.trim().slice(0, 40) : undefined
       const note = {
         at: now(),
         fromSession: typeof input?.fromSession === 'string' ? input.fromSession : '',
         turn: Number.isInteger(input?.turn) ? input.turn : 0,
         kind,
         text,
+        ...(basis === undefined ? {} : { basis }),
+        ...(role === undefined ? {} : { role }),
+        ...(sourceIds.length === 0 ? {} : { sourceIds }),
       }
       const next = { ...current, notes: [...(current.notes ?? []), note], updatedAt: note.at }
       await table.put(id, next)

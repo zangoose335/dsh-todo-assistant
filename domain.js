@@ -36,6 +36,9 @@ export const KINDS = ['defect', 'idea']
 /** Note kinds accepted by the append-only note list. */
 export const NOTE_KINDS = ['supplement', 'evidence', 'status']
 
+/** A card may reference at most this many history/file sources. */
+export const SOURCE_LIMIT = 32
+
 /** Backend record keys must match `[a-zA-Z0-9_-]+` (storage-json rule). */
 const ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
 const ID_LENGTH = 4
@@ -57,10 +60,25 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     file: z.string().optional(),
   })
 
+  const sourceRef = z.object({
+    sid: z.string(),
+    kind: z.string(),
+    label: z.string(),
+    purpose: z.string().optional(),
+    where: where.optional(),
+    turnRange: seqRange.optional(),
+    origin: z.enum(['stated', 'captured', 'derived']).default('stated'),
+    verified: z.boolean().default(false),
+    at: z.number().int(),
+  })
+
   const evidenceRef = z.object({
     label: z.string(),
     text: z.string(),
     where: where.optional(),
+    basis: z.enum(BRIEF_BASES).optional(),
+    observed: z.boolean().optional(),
+    sourceIds: z.array(z.string()).optional(),
   })
 
   const parkedRef = z.object({
@@ -68,6 +86,9 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     label: z.string(),
     why: z.string(),
     where: where.extend({ offset: z.number().optional() }).optional(),
+    basis: z.enum(BRIEF_BASES).optional(),
+    observed: z.boolean().optional(),
+    sourceIds: z.array(z.string()).optional(),
   })
 
   const note = z.object({
@@ -76,6 +97,9 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     turn: z.number().int(),
     kind: z.enum(NOTE_KINDS),
     text: z.string(),
+    basis: z.enum(BRIEF_BASES).optional(),
+    sourceIds: z.array(z.string()).optional(),
+    role: z.string().optional(),
   })
 
   const origin = z.object({
@@ -172,6 +196,8 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
 
     mustRead: z.array(evidenceRef).default([]),
     park: z.array(parkedRef).default([]),
+    /** Pointers to history/file evidence; never the body. */
+    sources: z.array(sourceRef).max(SOURCE_LIMIT).default([]),
     notes: z.array(note).default([]),
   })
 
@@ -404,7 +430,22 @@ export function buildRecord(input, { now, nextId, label }) {
  * @returns the record plus the soft warnings shown back to the model.
  * @throws {TodoInputError} when a field is missing or over its limit.
  */
-export function assembleCapture(input, { now, nextId, origin, code, workspace, label, request }) {
+/** Normalize optional source ids shared by evidence/park/note fields. */
+function normalizeSourceIds(value) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((sid) => typeof sid === 'string' && sid.trim() !== '').map((sid) => sid.trim()))].slice(0, 32)
+}
+
+/** Normalize an optional BriefBasis on legacy evidence/park fields. */
+function normalizeBasis(value, field) {
+  if (value === undefined) return undefined
+  if (!BRIEF_BASES.includes(value)) {
+    throw new TodoInputError('todo/invalid-basis', `${field}.basis must be one of: ${BRIEF_BASES.join(', ')}`)
+  }
+  return value
+}
+
+export function assembleCapture(input, { now, nextId, origin, code, workspace, label, request, observedFiles }) {
   const title = cleanLine(input?.title)
   if (title === '') throw new TodoInputError('todo/title-required', 'title is required')
   if (textLength(title) > CAPTURE_LIMITS.title) {
@@ -466,7 +507,17 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
     const label = cleanLine(item?.label, CAPTURE_LIMITS.mustReadLabel)
     if (label === '') throw new TodoInputError('todo/invalid-must-read', `mustRead[${index}].label is required`)
     const where = normalizeWhere(item?.where)
-    return where === undefined ? { label, text } : { label, text, where }
+    const sourceIds = normalizeSourceIds(item?.sourceIds)
+    const basis = normalizeBasis(item?.basis, 'mustRead')
+    const observed = where?.file !== undefined && observedFiles instanceof Set ? { observed: observedFiles.has(where.file) } : {}
+    return {
+      label,
+      text,
+      ...(where === undefined ? {} : { where }),
+      ...(basis === undefined ? {} : { basis }),
+      ...observed,
+      ...(sourceIds.length === 0 ? {} : { sourceIds }),
+    }
   })
 
   const parkRaw = input?.park === undefined || input?.park === null ? [] : input.park
@@ -489,7 +540,18 @@ export function assembleCapture(input, { now, nextId, origin, code, workspace, l
       throw new TodoInputError('todo/park-why-too-long', `park[${index}].why must be at most ${CAPTURE_LIMITS.parkWhy} characters`)
     }
     const where = normalizeWhere(item?.where)
-    return where === undefined ? { id: `p${index + 1}`, label, why } : { id: `p${index + 1}`, label, why, where }
+    const sourceIds = normalizeSourceIds(item?.sourceIds)
+    const basis = normalizeBasis(item?.basis, 'park')
+    const observed = where?.file !== undefined && observedFiles instanceof Set ? { observed: observedFiles.has(where.file) } : {}
+    return {
+      id: `p${index + 1}`,
+      label,
+      why,
+      ...(where === undefined ? {} : { where }),
+      ...(basis === undefined ? {} : { basis }),
+      ...observed,
+      ...(sourceIds.length === 0 ? {} : { sourceIds }),
+    }
   })
 
   const symbolsRaw = input?.symbols === undefined || input?.symbols === null ? [] : input.symbols
@@ -617,6 +679,50 @@ export function applyPatch(record, patch, at) {
 }
 
 /**
+ * Sources for a card. Stored sources win; a legacy card without `sources`
+ * projects a read-only `s0` origin plus file pointers, never writing them back.
+ *
+ * @param record - stored record.
+ * @returns source pointers without any body.
+ */
+function sourcesForRecord(record) {
+  const stored = Array.isArray(record.sources) ? record.sources : []
+  if (stored.length > 0) return stored
+  const sources = []
+  if (record.origin !== undefined && record.origin !== null) {
+    sources.push({
+      sid: 's0',
+      kind: 'session',
+      label: 'origin session',
+      where: { sessionId: record.origin.sessionId, seqRange: record.origin.seqRange },
+      turnRange: [record.origin.turn, record.origin.turn],
+      origin: 'stated',
+      verified: false,
+      at: record.origin.at,
+    })
+  }
+  const files = []
+  for (const item of record.mustRead ?? []) if (typeof item?.where?.file === 'string') files.push(item.where.file)
+  for (const item of record.park ?? []) if (typeof item?.where?.file === 'string') files.push(item.where.file)
+  for (const file of record.touchedFiles ?? []) if (typeof file === 'string') files.push(file)
+  const seen = new Set()
+  for (const file of files) {
+    if (file === '' || seen.has(file)) continue
+    seen.add(file)
+    sources.push({
+      sid: `s${sources.length}`,
+      kind: 'file',
+      label: file,
+      where: { file },
+      origin: 'stated',
+      verified: false,
+      at: record.updatedAt,
+    })
+  }
+  return sources.slice(0, SOURCE_LIMIT)
+}
+
+/**
  * Project the list-row shape (L0, DESIGN.md §3.2) sent to the browser. Reading a
  * card into context is a separate, cheaper-tier concern; the L0 keeps a row small.
  *
@@ -625,6 +731,7 @@ export function applyPatch(record, patch, at) {
  */
 export function projectL0(record) {
   const files = record.touchedFiles ?? []
+  const sources = Array.isArray(record.sources) ? record.sources : []
   return {
     id: record.id,
     ...labelOf(record),
@@ -638,6 +745,9 @@ export function projectL0(record) {
     symptom: record.core?.symptom ?? '',
     touchedFiles: files.slice(0, 3),
     touchedFileCount: files.length,
+    sourceCount: sources.length,
+    sessionSourceCount: sources.filter((source) => source.kind === 'session').length,
+    fileSourceCount: sources.filter((source) => source.kind === 'file').length,
     notesCount: (record.notes ?? []).length,
     parkCount: (record.park ?? []).length,
     mustReadCount: (record.mustRead ?? []).length,
@@ -685,6 +795,7 @@ export function projectFull(record) {
     core,
     mustRead: record.mustRead ?? [],
     park: record.park ?? [],
+    sources: sourcesForRecord(record),
     code: record.code ?? emptyCode(),
     touchedFiles: record.touchedFiles ?? [],
     notes: record.notes ?? [],
