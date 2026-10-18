@@ -212,17 +212,19 @@ AI to add useful new evidence to a card when appropriate.
 
 ## Current stage and limits
 
-P0-BASE, T1, T2, T3, and T4 are implemented at the foundation level:
+P0-BASE and T1–T4 foundation work are implemented, and T5/Gate 1 acceptance has passed:
 
 -   TaskBrief creation, persistence, reading, legacy derivation, and sidebar display;
 -   the `brief.nextAction` / legacy `nextStep` contract;
 -   brief-aware duplicate detection (shared file plus title/goal similarity);
 -   version-1 compatibility, brief persistence, and a downgrade-risk simulation.
 
-**Gate 1/T5 has passed the formal acceptance conditions in `docs/PLAN.md` §6. This conclusion applies only to the current uncommitted working tree; it is not a verification of a committed or released version.**
+**Gate 1/T5 has passed the formal acceptance conditions in `docs/PLAN.md` §6. This conclusion applies to the committed and pushed `f7e3a98`; it is not a released-version verification.**
 Evidence: `node scripts/verify-brief.mjs` 117/117, `node scripts/verify-domain.mjs` 193/193, and `git diff --check` pass; among the ten scenarios, 1–9 have real-model/deterministic evidence and scenario 10 is covered by `todo/brief-required` / `todo/brief-source-only` rejection; scenario 7 was retested twice under the latest 3,641-character tool description. Except for scenario 7, the existing evidence for scenarios 1–9 mainly comes from earlier description versions and was not all re-run under the 3,641-character version.
 
-**Not yet verified before release (these do not block the §6 code Gate):** duplicate-prompt visibility and choice in the real DSH UI, real older-version read/write compatibility, backup/restore/upgrade/downgrade/migration/rollback drills, and the scenario C clarification probe. Do not describe release checks as complete until these are done.
+**Gate 1 UI smoke has been verified by the developer (2026-10-19):** the workspace filter in the `#` picker, completion/reverse animation, reduced motion, narrow layout, and the duplicate prompt showed no issues.
+
+**Not yet verified before release (these do not block the §6 code Gate):** real older-version read/write compatibility, backup/restore/upgrade/downgrade/migration/rollback drills, and the scenario C clarification probe. Do not describe release checks as complete until these are done.
 
 Full history retrieval/authorization, brief-first handoff seeds, Project Plan, Markdown import/export, and
 drag-and-drop are not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older

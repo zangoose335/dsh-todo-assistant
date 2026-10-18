@@ -122,9 +122,10 @@ DSH Todo Assistant 的核心价值不是保存更多历史信息，也不是给�
 | 相关性检测 | 只有“本轮触及文件”的精确匹配/共享目录前缀；符号与 commit 两路已明确不做 | `detect.js:159-181`、`docs/DESIGN.md:444-473` |
 | 子会话归属 | `rootSessionId` 只在部分较新的卡上存在，旧卡没有 | `domain.js:79-88`、`api.js:73-90` |
 
-### 1.3 尚未实现的能力
+### 1.3 未实现/后续能力（Gate 1 后）
 
-- T：任务简报模型、卡片质量门禁、当前上下文提炼、可信度区分、重复检测质量、基础创建验收（Stage 1 MVP）。
+> T（TaskBrief、质量门禁、当前上下文提炼、可信度、去重、创建验收）与 README 修正已在 Gate 1 完成，不再列在这里。
+
 - H：任务交接质量（简报优先的新会话/输入框/文档核对，Stage 3）。
 - A2（Stage 2）：卡片关联任意历史轮次、多个历史来源。
 - A3（Stage 2）：当前可见上下文优先、按信息缺口决定是否检索、对话开头五个有效轮次的第一批、检索停止条件、DSH 工具审批门禁。
@@ -135,7 +136,6 @@ DSH Todo Assistant 的核心价值不是保存更多历史信息，也不是给�
 - C（Stage 4）：阶段执行结果、计划变化识别、修改确认、版本与决策历史。
 - D（Stage 4）：从右侧栏拖拽卡片到输入框插入上下文。
 - E（Stage 4）：卡片内部步骤与 `x.y-N` 编号。
-- README 与实际能力对齐的文档修正（可并行，非 MVP 阻塞）。
 
 ### 1.4 需要进一步调查/验证的 DSH API（不要假设已可用）
 
@@ -693,6 +693,8 @@ graph TD
   - 验证审批与范围的绑定：`displayReason` 能否展示目标轮次/序号范围、用途、预计规模；一次批准是否只覆盖该次调用。
   - 验证 Token 指标：`tokenMeter`/`TokenUsage` 能否提供实际 token；若不能，记录消息数/事件数/批次数/字符数等代理指标。
   - 产出 `docs/DESIGN.md` 增补或 `docs/ADR-history-readback.md`（批准后落地）。
+> **状态（2026-10-19）**：已产出 `docs/ADR-history-readback.md`（提议）。代码/类型事实已核对；真实 web 审批与 `readSurface` persisted/compacted 探针仍待补。
+
 - **主要文件/模块**：`recall.js`、`tool.js`、`host.js`、`docs/DESIGN.md`；DSH `dsh-tools`、`dsh-user-approval`、`dsh-session-query`（只读调查）。
 - **前置依赖**：无。
 - **验收标准**：ADR 至少回答 10 个问题：能读什么；有效轮次怎么算；开头不足 5 轮怎么办；当前轮/子会话怎么排除；压缩后能否定位；如何判断开头是否仍可见；审批服务在 web profile 是否可用；如何 fail closed；一次批准覆盖什么；Token 实际值是否可得、代理指标是什么。
@@ -854,11 +856,11 @@ graph TD
 | P0-BASE | 已完成 | version-1 fixture 可打开；原始 184 项基线不回归 |
 | T1 TaskBrief | 已完成基础实现 | optional brief、旧卡只读派生、brief-first 读取/UI；`verify-brief.mjs` 通过 |
 | T2 当前上下文提炼 | 已完成基础实现；真实模型覆盖场景 1–8 | 提示词、六类 basis、质量 warning；场景 1–8 卡片 basis 正确且未调用 `todo_recall`；C 探针未定义，列为发布前检查 |
-| T3 去重质量 | 已完成基础实现；真实 UI 未验证 | 共享文件 + 标题/目标相似度；不同目标保护；duplicate 返回候选、`forceCreate` 确认创建、`todo_note` 确认补充 |
+| T3 去重质量 | 已完成基础实现；duplicate UI 已由开发者验证（2026-10-19） | 共享文件 + 标题/目标相似度；不同目标保护；duplicate 返回候选、`forceCreate` 确认创建、`todo_note` 确认补充 |
 | T4 数据兼容 | 基础实现；真实旧版本未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；**模拟不等同真实旧插件** |
-| T5 / Gate 1 | **PASS（§6 正式条件；仅当前未提交工作区）** | 十场景结果符合 §8.0；场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝；场景 7 在最新 3641 字符描述下两次独立测试通过（#6.1/#6.2）；除场景 7 外，场景 1–9 的证据主要来自较早描述版本；发布前风险见下 |
+| T5 / Gate 1 | **PASS（§6 正式条件；已提交并推送 f7e3a98）** | 十场景结果符合 §8.0；场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝；场景 7 在最新 3641 字符描述下两次独立测试通过（#6.1/#6.2）；除场景 7 外，场景 1–9 的证据主要来自较早描述版本；发布前风险见下 |
 
-当前实际测试（针对当前未提交工作区）：
+Gate 1 验证基线（已提交并推送 f7e3a98）：
 
 - `node scripts/verify-brief.mjs` → **117/117**
 - `node scripts/verify-domain.mjs` → **193/193**
@@ -866,17 +868,24 @@ graph TD
 
 运行时确认：重启后 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；场景 7 两次子代理请求头均为该版本。
 
-发布前仍未完成/未验证的事项（不阻塞 §6 代码 Gate）：
+Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆盖）：
 
-1. 真实 DSH UI 中 duplicate 提示是否可见、开发者能否明确选择创建/补充；
-2. 真实模型在意图不明（场景 C）时是否稳定澄清；
-3. 场景 5 的真实模型是否主动调用 `ask_user_question`（#4.22 已能在卡片内指出冲突并给出 blocking openQuestions，满足 §8.0 的“指出冲突/询问”二选一；主动提问路径未验证）；
-4. 真实旧版本插件读取/写回新 brief 的行为；
-5. 真实备份、恢复、升级、降级、迁移和回滚演练；
-6. 场景 10 的真实模型重测（当前由确定性拒绝测试保证；`todo/brief-required` / `todo/brief-source-only` 已拒绝且不落库）；
-7. 场景 1–9 中除场景 7 外的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
+- `#` 引用框按当前会话工作区筛选；
+- 卡片完成/反向切换的状态写入与动画；
+- 系统“减少动态效果”下状态仍更新，且无飞行/幸存卡 reflow；
+- 窄窗口下标题、删除、展开、meta、处理按钮无重叠；
+- duplicate 提示可见、可选择追加/新建，未产生意外重复卡。
 
-> **Gate 1 状态：PASS（按 §6 正式条件，仅适用于当前未提交工作区）。** 上列 1–7 是发布前风险/检查，不是 §6 代码 Gate 的未完成条件；在补齐前，不得把发布检查描述为全部完成。
+发布前仍未完成/未验证的事项（不阻塞 §6 代码 Gate；UI 冒烟已完成项不在内）：
+
+1. 真实模型在意图不明（场景 C）时是否稳定澄清；
+2. 场景 5 的真实模型是否主动调用 `ask_user_question`（#4.22 已能在卡片内指出冲突并给出 blocking openQuestions，满足 §8.0 的“指出冲突/询问”二选一；主动提问路径未验证）；
+3. 真实旧版本插件读取/写回新 brief 的行为；
+4. 真实备份、恢复、升级、降级、迁移和回滚演练；
+5. 场景 10 的真实模型重测（当前由确定性拒绝测试保证；`todo/brief-required` / `todo/brief-source-only` 已拒绝且不落库）；
+6. 场景 1–9 中除场景 7 外的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
+
+> **Gate 1 状态：PASS（按 §6 正式条件，已提交并推送 f7e3a98）。** 上列 1–6 是发布前风险/检查，不是 §6 代码 Gate 的未完成条件；在补齐前，不得把发布检查描述为全部完成。
 
 ### 阶段 2：历史情报补全（A，后续阶段）
 
@@ -885,6 +894,8 @@ graph TD
 #### A2 统一 `sources` 模型与按需多来源回读（Stage 2）
 
 > **不阻塞 Gate 1**：T1 已用 `brief.leads`/`sources` 保存当前上下文线索；A2 增加多来源、回读与来源追加，属于 Stage 2 的历史补全。
+
+> **状态（2026-10-19）**：source schema、store `addSource`/`findSource`、L0 来源计数、legacy `s0`/文件来源合成、`todo_read` 的 `sources`/`source:<sid>`、recall 多来源与 `firstBatch`/stats、mustRead/park/note 的 sourceIds 已落地；`verify-domain.mjs` 247/247。A3 的 `tools/pre-execute` ask guard、`gap`/`reason`/`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已接入；append-on-read 的持久化 `duplicatesSkipped`、真实审批探针仍待做。
 
 - **目标与原因**：让一张卡片能引用创建卡片之前的任意历史轮次/片段，支持多个来源，并让 `todo_recall` 读取卡片实际引用的来源；来源只保存轻量指针，不保存正文，避免 Token 膨胀。
 - **当前问题**：`todo_add` 只写当前轮的 `origin.seqRange`（`tool.js:141-167`）；`recall.js:91-105` 只按该范围过滤；`mustRead/park` 的 `where` 只有一个指针（`domain.js:52-69`）；没有多来源模型；没有读取统计/去重；没有审批门禁。
@@ -898,7 +909,7 @@ graph TD
   7. **Append-on-read**：只有正文读取成功后追加/更新 session source；失败/空范围/仅 index 不追加；同范围再次读取返回 `duplicatesSkipped`，不重复注入。
   8. **Token 统计**：输出 `stats:{messages, events, estimatedTokens, batch, duplicatesSkipped}`；不存正文、不重复处理相同来源；不把整段历史复制进卡片。
 - **主要文件/模块**：`domain.js`、`api.js`、`recall.js`、`tool.js`、`host.js`、`scripts/verify-domain.mjs`。
-- **前置依赖**：P0-A1、P0-E1、P0-BASE。
+- **前置依赖**：P0-A1、P0-E1、P0-BASE。注：A2 只取 P0-E1 的“稳定编号/ID 约定”部分；P0-E1 中拖拽相关调查仍属 Stage 4，不阻塞 A2。
 - **验收标准**：
   - 一张卡可有 ≥2 个 session source；`todo_recall` 能按 `source` 读各自 index/body。
   - 旧卡无 `sources` 时，origin 仍可回读，显示为隐式 `s0`。
@@ -912,6 +923,8 @@ graph TD
 #### A3 当前可见优先、对话开头有效 5 轮、停止条件与 DSH 审批（Stage 2）
 
 > **不阻塞 Gate 1**：T2 已要求建卡默认只用当前可见上下文、不自动调用 `todo_recall`；A3 增加真正需要回读时的窗口/授权/停止条件。
+
+> **状态（2026-10-19）**：`approval.js` + `host.js` 的 `tools/pre-execute` ask guard 已接入，每次 `todo_recall`（含 manifest）都会请求审批；`gap`/`reason` 进入审批文案，`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已实现；append-on-read 的持久化 `duplicatesSkipped` 与真实 web 审批探针仍待做。
 
 - **目标与原因**：把 2.3.1-2.3.8 落实为流程和接口：先用当前可见上下文，确认信息缺口后才检索；第一批是对话开头最早 5 个有效轮次，不是必选项，也不是成功指标；正文/扩大范围走 DSH 工具审批；信息足够立即停止；Token 效率优先。
 - **当前问题**：没有 gap-first 流程；没有有效轮次定义；没有开头首批；没有停止条件；没有 DSH 审批；`todo_recall` 只按 origin 范围；标记可能被误解为历史读取授权；没有 Token 代理指标。
@@ -947,6 +960,8 @@ graph TD
 
 > **不阻塞 Gate 1**：`basis` 的核心区分（需求/决定/已验证/推断/未知/被替代）已在 T2 的 TaskBrief 中实现；A4 只增加 `sourceIds`/`where` 链接、历史冲突和 `superseded` 判断。
 
+> **状态（2026-10-19）**：`mustRead`/`park`/`notes` 的 `basis`/`sourceIds`/`role` round-trip 与 `todo_read` 展示已落地；冲突/`superseded` 规则沿用 T2 的 brief 校验；A5 observed 校验仍待做。
+
 - **目标与原因**：在 T2 的任务简报/可信度之上，把已确认信息链接到来源，处理历史与当前的冲突，并标记被后续决定替代的旧方案；**补链接不得触发额外历史读取**。
 - **当前问题**：T2 已能表达 brief/basis，但旧 `mustRead`/`park`/`notes` 还没有 `sourceIds`/`where` 链接；历史冲突与 `superseded` 没有统一规则；现有数据中 `seqRange` 使用很少，追溯弱。
 - **实施方向**：
@@ -969,6 +984,8 @@ graph TD
 #### A5 参考文档路径、observed 校验与交接核对指引（Stage 2 增强）
 
 > **不阻塞 Gate 1**：T1 的 `brief.leads` 已能在当前上下文保存文件/文档路径与用途；A5 增加“是否真的读过/是否仍成立”的 observed 校验和交接核对，属于 Stage 2 的验证增强。
+
+> **状态（2026-10-19）**：host 已从当前轮 `read`/`write`/`edit` 等 tool/call 收集 observed 路径，并在 `mustRead`/`park` 的文件引用上写入 `observed:true/false`，`todo_read` 显示 observed/unverified；A5 的文件 SourceRef 合并、seed 核对指引与 fs 存在性检查仍待做。
 
 - **目标与原因**：在 T1 的 `brief.leads`（当前上下文路径/用途）之上，增加“实际读过/确认过”“历史中提及”“未核实”的校验；后续会话先核对文档再改代码；**路径优先于提前总结，避免为了完整而读所有文档**。
 - **当前问题**：T1 的 `leads` 能保存当前上下文路径，但 host 不校验是否真的读过；旧 `mustRead.where.file` 没有 provenance；`buildSeed` 没有核对指令（`client.js:1228-1269`）。
@@ -1048,7 +1065,7 @@ graph TD
   3. 加入核对指引：先看简报；如引用文件/文档，先确认是否存在/是否仍成立；冲突以实际核实为准并告知开发者；不要自动读历史，需回读时按 Stage 2 授权。
   4. 简报缺失/过短时，提示开发者补充或回读，而不是假装完整。
 - **主要文件/模块**：`client.js`（buildSeed/startSessionFor）、`api.js`（detail 读取）。
-- **前置依赖**：T1、T5、A5（文档核对指引，Stage 2）。
+- **前置依赖**：T1、T5、A5（文档核对指引，Stage 2）。H 阶段的硬依赖为 Gate 1 + A5；A6/Gate 2 不阻塞 H1–H3，可与 A6 并行。
 - **验收标准**：新会话能理解 what/why/constraints/next；不自动调用历史；不把路径当事实；简报超限截断保留关键项。
 - **测试要求**：种子文本断言/手工；新会话行为探针；无历史读取；文档冲突场景。
 - **风险与兼容性**：client-only 构建与 host 不一致；旧卡 brief 投影不完整；prompt 过长；文档路径失效。
@@ -1406,7 +1423,7 @@ graph TD
 1. **P0（Stage 1 解锁，立即）**：`P0-BASE`（184/184 基线 + version-1 旧 fixture）。`P0-F1` 文档修正可并行，不阻塞。`P0-A1`（历史/授权调查）属于 Stage 2，`P0-E1/D0`（编号/拖拽调查）属于 Stage 4；它们都**不得**阻塞 Stage 1。
 2. **P1（MVP，最高功能优先级）**：`T1 → T2/T3/T4 → T5 → Gate 1`。先做好“从当前上下文提炼必要情报并创建高质量待办”：任务简报、可信度、卡片质量、重复检测、数据保存与兼容。**Gate 1 通过前，不开始 A2-A6、B/C/D/E 的产品实现。**
 3. **P2（Stage 2，历史补全）**：Gate 1 后 `A2 → A3 → A4/A5 → A6`。历史读取是辅助能力，不是 Stage 1 的前置条件；验证授权、有效轮次、冲突和累计成本。
-4. **P3（Stage 3，交接质量）**：Gate 1 + Gate 2 后 `H1 → H2 → H3`。让新会话/输入框直接使用简报，减少恢复任务成本。
+4. **P3（Stage 3，交接质量）**：Gate 1 + A5 后 `H1 → H2 → H3`。让新会话/输入框直接使用简报，减少恢复任务成本；A6/Gate 2 不阻塞 H，可与 A6 并行。
 5. **P4（Stage 4，扩展）**：Gate 1/2/3 后 `B1 → B2 → B3/B4 → B5`、`C1 → C4`、`E2 → E4`、`D1 → D3`。Project Plan、Markdown 导入、持续维护、步骤、拖拽都在这里；不得反向阻塞 Stage 1-3。
 
 ### 5.2 为什么这样排
@@ -1492,6 +1509,8 @@ graph TD
 - README/README.en 不再暗示未实现能力；明确“任务简报优先、来源兜底”。
 - DESIGN 更新新模型、MVP 范围、测试计数、已知偏差。
 - 每个 Gate 完成后同步对应文档，而不是最后一次性补。
+
+> **Gate Docs 状态（2026-10-19）**：README/README.en、DESIGN、PLAN 已同步到已推送的 `f7e3a98`；Gate 1 UI 冒烟已由开发者验证。发布前剩余风险见 §T5。
 
 ---
 

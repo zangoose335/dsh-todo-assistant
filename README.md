@@ -160,17 +160,19 @@ AI：如果本轮产生了值得保留的新证据，可以通过 note 追加到
 
 ## 当前阶段与限制
 
-当前已完成 P0-BASE、T1、T2、T3、T4 的基础实现：
+当前已完成 P0-BASE、T1–T4 的基础实现和 T5/Gate 1 验收：
 
 - TaskBrief 创建、持久化、读取、旧卡派生和右栏展示；
 - `brief.nextAction` 与旧 `nextStep` 的统一契约；
 - brief 参与去重（共享文件 + 标题/目标相似度）；
 - version-1 旧数据兼容，以及 brief 持久化和降级风险模拟。
 
-**Gate 1/T5 已按 `docs/PLAN.md` §6 的正式验收条件通过；该结论仅适用于当前未提交工作区，不是已提交/已发布版本的验证。**
+**Gate 1/T5 已按 `docs/PLAN.md` §6 的正式验收条件通过；该结论适用于已提交并推送的 `f7e3a98`，不是已发布版本的验证。**
 验证依据：`node scripts/verify-brief.mjs` 117/117、`node scripts/verify-domain.mjs` 193/193、`git diff --check` 通过；十个场景中场景 1–9 有真实模型/确定性证据，场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝保证；场景 7 已在最新 3641 字符工具描述下完成两次独立测试。除场景 7 外，场景 1–9 的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
 
-**发布前仍未验证（不阻塞 §6 代码 Gate）：** 真实 DSH UI 中 duplicate 提示的可见性与选择、真实旧版本读写兼容、备份/恢复/升级/降级/迁移/回滚演练、场景 C 澄清探针。补齐前不得把发布检查描述为已完成。
+**Gate 1 UI 冒烟已由开发者验证（2026-10-19）：** `#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。
+
+**发布前仍未验证（不阻塞 §6 代码 Gate）：** 真实旧版本读写兼容、备份/恢复/升级/降级/迁移/回滚演练、场景 C 澄清探针。补齐前不得把发布检查描述为已完成。
 
 当前未实现完整历史检索/授权、任务交接的 brief-first 种子、Project Plan、Markdown 导入导出和拖拽。
 升级前建议先备份 `~/.dsh/storages/todo_assistant.json`；旧版本 schema 可能 strip 掉新 `brief` 字段，
