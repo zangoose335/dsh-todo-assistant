@@ -299,6 +299,10 @@ interface Note {
   新会话种子与右栏详情，供开发者对照与纠错。模型不参与这段文本的生成。
   消息里有 `#DB … #/db` 时只取对应块（标记剥离），多块按顺序各取一段并记 `block` 序号；
   需要修订时 `patch.request.text` 可覆盖（只用于修复早期捕获）。
+- **未标记消息的 request 范围**：`todo_add` 接受 optional `requestExcerpt`。有标记时忽略它，完整记录标记块；
+  无标记时只保存模型给出的、与该待办有关的原文片段。`requestExcerpt:''` 表示该消息只有创建指令或包含其他任务，
+  不保存 request；非精确匹配的摘录不保存，并返回 warning。若模型省略摘录，单段消息保留全文；多段消息只保留第一段，
+  第一段若只是创建指令则不保存 request。这个回退不依赖模型参数，避免把同一条消息里的后续任务静默并入 request。
 - `park[].label` + `why` 的存在，是为了让开发者和 AI 在**不读正文**的情况下判断要不要读。这是"有备无患"能成立的前提
 - `notes[]` 只追加。轮 6 的补充就是一条 note
 - `todo_write` 的类型区分不做强类型，靠 `status` + 视图（tab）区分；`defect` 要求 `cause` 和下一步（`nextStep` 或 `brief.nextAction`），`idea` 要求 `intent`、`cause` 可空
@@ -312,7 +316,7 @@ interface Note {
 ### 5.1 `todo_add`
 
 必填：`title`、`kind`、`touchedFiles`、`mustRead`
-可选：`brief`、`nextStep`、`forceCreate`、`symptom`、`cause`、`intent`、`park`、`symbols`
+可选：`brief`、`nextStep`、`requestExcerpt`、`forceCreate`、`symptom`、`cause`、`intent`、`park`、`symbols`
 
 > `brief.nextAction` 是规范下一步。`nextStep` 只作为旧调用兼容镜像：
 > 只给 `brief` 可以建卡；只给 `nextStep` 仍兼容；两者同时给且冲突时以
@@ -487,7 +491,8 @@ AI:  [todo_add: 只填本待办相关字段]
   结束标签大写；**只在输入时补**（删除不补）；开头标签被破坏时连同结束标签与空格一起删掉；
 - 打 `#` → 弹出卡片引用框：上方未完成（最多 8 条）、不满 8 条时加分割线补已完成；
   排序为「本会话 → 编号从大到小」；`#i`/`#b`/`#d` 这类前缀过滤类型，
-  完整词 `#idea`/`#bug`/`#defect` 同样生效；
+  完整词 `#idea`/`#bug`/`#defect` 同样生效；候选由 `list` 的 `bySession` 查询只取当前会话所属工作区；
+  无会话 ID 时退回全部工作区；会话或 cwd 缺失时回退 INBOX，工作区解析不到时使用会话 cwd，解析器异常时回退 INBOX。
 - 选中后插入 `#x.y「标题」 `（带尾随空格）；`「」` 被删坏时整段标题删除，只留编号；括号完整时正文随便改。
 
 > 官方 `InputTriggerController` 的 `lexicon` 只有 `'/'` 和 `'@'` 两个键，没有注册第三个触发符的公开入口，
@@ -538,12 +543,12 @@ AI:  [todo_add: 只填本待办相关字段]
 ├─────────────────────────────────────┤
 │ 未完成 · 待修复 · 待添加 · 已完成 · 全部 │
 ├─────────────────────────────────────┤
-│ ⬤ 鉴权 token 刷新后 401      待修复 │
+│ ⬤ 鉴权 token 刷新后 401             │
 │   refresh 时未带 rotation…          │
 │   src/auth/router.ts  +2            │
 │   3 条补充 · [处理 ▾]               │
 ├─────────────────────────────────────┤
-│ ⬤ 支持批量导入               待添加 │
+│ ⬤ 支持批量导入                      │
 └─────────────────────────────────────┘
 ```
 
@@ -552,9 +557,9 @@ AI:  [todo_add: 只填本待办相关字段]
 - **手动编辑（必做）**：标题就地编辑、**编号左侧 radio 标完成**、`×` 菜单（删除 / 归档 / 取消）、note 删除
   理由：标题不合开发者想法会导致"第一眼没看出来 → 重复添加或延迟处理"；删 note 比让 AI 改更快
 - **状态只有三个面**：待处理（radio 空）、已完成（radio 实心）、已放弃（`×` → 归档，圆点虚化）；
-  `doing` 不再使用；kind 标签在卡片左下角，`×` 在右上角
+  `doing` 不再使用；卡片不显示独立的类型文字标签，未完成卡的类型由 radio 边框颜色区分（idea/defect），`×` 在右上角
 - **没有"正在处理"标记**：会话接手不再写 `handling`（字段保留以兼容旧数据，UI 不显示、也不写入）
-- **「处理」菜单**：`新会话中立即执行` / `插入当前会话`
+- **「处理」菜单**：`新会话中立即执行` / `插入当前会话`。新会话开场会明确要求先只读代码/资料并给出方案，不修改文件；开发者确认方案后才进入实现。需要开发者决定、确认方案或补充信息时，两个入口都要求在任务处理过程中调用 DSH 的 `ask_user_question` 并等待回答，不能先自行决定，也不能把问题留到完成后的回复。
 - **五个视图**：未完成（open+doing）、待修复（defect）、待添加（idea）、已完成（done+dropped）、全部。
   数量口径一致：未完成 = 待修复 + 待添加，全部 = 未完成 + 已完成
 - **筛选记忆**：选中的视图写 `localStorage['todo-assistant:view']`，重启后仍停在上次那个
@@ -684,11 +689,11 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > 后来补了 `#MEMO` 别名、`major.minor` 编号、`todo_status`、输入框 `#db` 补全、`#` 引用框、
 > 筛选持久化与**工作区通用规则**（`rules` 表 + 新会话种子拼接）。`scripts/verify-domain.mjs` 通过 181/181。
 >
-> **Stage 1 / T1-T4 已完成（T5/Gate 1 未完成）**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
+> **Stage 1 / T1-T5 已完成；Gate 1 已按 `docs/PLAN.md` §6 正式条件通过（仅适用于当前未提交工作区）**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
 > `brief.nextAction` 与 `nextStep` 的统一契约、brief 参与的重复检测、version-1 兼容和旧 schema 降级模拟均已实现。
-> 当前 `scripts/verify-domain.mjs` 通过 184/184，`scripts/verify-brief.mjs` 通过 117/117。
-> **Gate 1/T5 尚未通过**：10 个场景还没有真实模型/UI 证据。确定性测试已覆盖无 brief 的路径-only 拒绝、
-> `forceCreate` 确认创建和 `todo_note` 合并，但这不等于 Gate 1 已通过。
+> 当前 `scripts/verify-domain.mjs` 通过 193/193，`scripts/verify-brief.mjs` 通过 117/117，`git diff --check` 通过。
+> 十个场景中，场景 1–9 有真实模型/确定性证据，场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝；场景 7 已在最新 3641 字符工具描述下完成两次独立测试（#6.1/#6.2）。除场景 7 外，场景 1–9 的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
+> **发布前仍未验证**：真实 DSH UI 的 duplicate 提示与选择、真实旧版本读写兼容、备份/恢复/迁移演练、场景 C 澄清探针；这些不阻塞 §6 代码 Gate，但在补齐前不得把发布检查描述为已完成。
 
 > **与文档的已知偏差**（均为记录过的取舍，不是遗漏）：
 > 1. §7 的三路检测信号只实现"触及文件"；符号与 commit **已决定不做**（见 §7 的实现说明）；

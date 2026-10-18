@@ -94,7 +94,6 @@ window.__ModuleLoader__.load({
       'state.busy': '写入中…',
       'meta.files': '{n} 个文件',
       'meta.notes': '{n} 条补充',
-      'meta.count': '共 {n} 条',
       'untitled': '（未命名）',
       'card.hit': '相关',
       'capture.action': '记录待办',
@@ -132,7 +131,7 @@ window.__ModuleLoader__.load({
       'seed.files': '触及文件',
       'seed.commit': '写卡时提交',
       'seed.notes': '已有 {n} 条补充（todo_read part=notes 可看）',
-      'seed.hint': '（需要更多细节用 todo_read #{id}；有新发现用 todo_note 追加，不要重写卡片；改完后主动问开发者是否把 #{id} 标记为完成，确认后再调 todo_status。）',
+      'seed.hint': '（需要更多细节用 todo_read #{id}；有新发现用 todo_note 追加，不要重写卡片；本轮先只读代码和现有资料并给出方案，不要修改任何文件；方案经开发者确认后再开始实现。处理过程中如果需要开发者做决定、确认方案或补充信息，使用 DSH 的 ask_user_question 工具在过程中提问并等待回答，不要自行决定，也不要把问题留到完成后的回复。完成后主动问开发者是否把 #{id} 标记为完成，确认后再调 todo_status。）',
       'seed.rules': '本工作区的通用规则：',
       'rules.title': '设置通用规则',
       'help.title': '待办助理使用说明',
@@ -152,7 +151,7 @@ window.__ModuleLoader__.load({
 - 一次记多条：在 AI 回复上点「记录待办」→ 勾选要记的段落 →「插入到对话框」，可以连着插几段，最后一次性发送。
 - 输入即记录：在输入框打 #db，会自动补全成 #DB  #/DB，把内容写在两个标记之间发出去就记好了；
   英文写 #memo（#MEMO  #/MEMO）。标记本身就表示"我同意记"，AI 不会再问。
-- 快速引用一张卡：输入框打 #，选中一张，会插入 #x.y「标题」，AI 看到就知道你指的是哪张。
+- 快速引用一张卡：输入框打 #；正常会话中候选按当前会话所属工作区筛选，缺少会话 ID 时退回查询全部工作区。选中一张会插入 #x.y「标题」，AI 看到就知道你指的是哪张。
 - 让 AI 收尾：在卡片上点「开始任务」，新会话以这张卡开场；改完它会问你要不要标记完成。
 - 固定要求写一次：在「设置通用规则」里写"一次只改一个文件""先解释影响面再动手"这类话，
   之后从卡片开的新会话都会自动带上。
@@ -166,7 +165,7 @@ window.__ModuleLoader__.load({
       'rules.save': '保存',
       'rules.saved': '已保存',
       'rules.empty': '这个工作区还没有规则',
-      'handling.insert': '现在切到待办 #{id}「{title}」：先用 todo_read 读它，再按里面的「下一步」继续；改完后问我是否标记完成。',
+      'handling.insert': '现在切到待办 #{id}「{title}」：先用 todo_read 读它，再按里面的「下一步」继续；需要我决定、确认方案或补充信息时，用 DSH 的 ask_user_question 在处理过程中问我并等待回答，不要先自行决定，也不要把问题留到最后；改完后问我是否标记完成。',
       'handling.boundTo': '由会话 {id} 处理',
       'action.expand': '展开详情',
       'action.collapse': '收起详情',
@@ -232,7 +231,6 @@ window.__ModuleLoader__.load({
       'state.busy': 'Saving…',
       'meta.files': '{n} files',
       'meta.notes': '{n} notes',
-      'meta.count': '{n} total',
       'untitled': '(untitled)',
       'card.hit': 'Related',
       'capture.action': 'Record todo',
@@ -270,7 +268,7 @@ window.__ModuleLoader__.load({
       'seed.files': 'Files',
       'seed.commit': 'Captured at commit',
       'seed.notes': '{n} note(s) already exist (todo_read part=notes)',
-      'seed.hint': '(Read todo_read #{id} for more detail; append new findings with todo_note instead of rewriting the card; when the work is done, ask the developer whether to mark #{id} done, then call todo_status.)',
+      'seed.hint': '(Read todo_read #{id} for more detail; append new findings with todo_note instead of rewriting the card; in this round, read code and existing materials and present a plan first — do not modify any files; start implementation only after the developer confirms the plan. If you need the developer to decide, confirm a plan, or supply missing information during the work, use the DSH ask_user_question tool while the task is running and wait for the answer; do not decide on your own and do not defer the question to the final reply. When the work is done, ask the developer whether to mark #{id} done, then call todo_status.)',
       'seed.rules': '本工作区的通用规则：',
       'rules.title': 'Workspace rules',
       'help.title': 'Todo Assistant guide',
@@ -290,7 +288,7 @@ How to use it
 - Several at once: on an assistant reply click "Record todo", pick paragraphs, then "Insert into composer"; repeat and send the batch together.
 - Record by typing: type #db in the composer; it completes to #DB  #/DB. Put the content between the markers and send.
   The English form is #memo (#MEMO  #/MEMO). The marker itself is your consent, so nothing else is asked.
-- Reference a card: type # and pick one; it inserts #x.y with the title, so the agent knows which card you mean.
+- Reference a card: type #; in a normal session the candidates are filtered to the current session's workspace, and when the session ID is missing it falls back to querying all workspaces. Picking one inserts #x.y with the title, so the agent knows which card you mean.
 - Let the agent finish it: click "Start task" on a card; the new session opens with that card as its brief and asks whether to mark it done when finished.
 - Standing rules: write them once under "Workspace rules" (e.g. "one file at a time"), and every new session started from a card carries them.
 
@@ -303,7 +301,7 @@ Keep in mind
       'rules.save': '保存',
       'rules.saved': '已保存',
       'rules.empty': '这个工作区还没有规则',
-      'handling.insert': 'Switch to todo #{id}「{title}」now: read it with todo_read first, then continue from its next step; ask me whether to mark it done when finished.',
+      'handling.insert': 'Switch to todo #{id}「{title}」now: read it with todo_read first, then continue from its next step; when you need me to decide, confirm a plan, or supply missing information, use the DSH ask_user_question tool during the work and wait for my answer — do not decide on your own and do not defer the question to the end; ask me whether to mark it done when finished.',
       'handling.boundTo': 'Handled by session {id}',
       'action.expand': 'Show details',
       'action.collapse': 'Hide details',
@@ -364,20 +362,24 @@ Keep in mind
 .tdash-view[data-on="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); box-shadow: 0 2px 6px rgba(0,0,0,.18), inset 0 0 0 1px var(--dsw-alias-border-l1); }
 .tdash-view .tdash-n { margin-left: 4px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .tdash-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 6px; }
-.tdash-card { position: relative; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+.tdash-card { box-sizing: border-box; min-height: 86px; position: relative; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
 .tdash-card[data-status="done"], .tdash-card[data-status="dropped"] { opacity: .62; }
-.tdash-row1 { display: flex; align-items: flex-start; gap: 6px; }
-.tdash-radio { flex: none; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; padding: 0; border-radius: 50%; border: 2px solid var(--dsw-alias-border-l3); background: transparent; cursor: pointer; position: relative; }
+.tdash-row1 { display: flex; align-items: flex-start; gap: 6px; padding-right: 24px; }
+.tdash-radio { flex: none; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; padding: 0; border-radius: 50%; border: 2px solid var(--dsw-alias-border-l3); background: transparent; cursor: pointer; position: relative; transition: border-color .15s ease, transform .15s ease; }
+.tdash-radio[data-done="true"] { animation: tdash-radio-pop .22s ease-out; }
+@keyframes tdash-radio-pop { 0% { transform: scale(.8); } 60% { transform: scale(1.16); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .tdash-radio[data-done="true"] { animation: none; } }
 .tdash-radio:hover { border-color: var(--dsw-alias-label-secondary); }
 .tdash-card[data-kind="idea"] .tdash-radio:not([data-done="true"]) { border-color: var(--dsw-alias-state-business-primary); }
 .tdash-card[data-kind="defect"] .tdash-radio:not([data-done="true"]) { border-color: var(--dsw-alias-state-error-primary); }
 .tdash-radio[data-done="true"] { border-color: var(--dsw-alias-state-success-primary); }
 .tdash-radio[data-done="true"]::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--dsw-alias-state-success-primary); }
 .tdash-radio[data-dropped="true"] { border-style: dashed; opacity: .55; }
-.tdash-kindtag { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary); }
 .tdash-metainline { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); font-size: 11px; }
-.tdash-footrow { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
-.tdash-topx { margin-left: auto; width: 20px; height: 20px; align-self: center; }
+.tdash-footrow { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+.tdash-topx { position: absolute; top: 0; right: 0; width: 20px; height: 20px; margin: 0; z-index: 2; }
+.tdash-expand { margin-left: -3px; }
+.tdash-topx .tdash-x { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; line-height: 1; transform: translateY(-1px); }
 .tdash-rules-btn { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
 .tdash-rules-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-info { flex: 0 0 auto; box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
@@ -481,7 +483,6 @@ Keep in mind
 .tdash-note { display: flex; align-items: flex-start; gap: 4px; }
 .tdash-note-text { flex: 1 1 auto; min-width: 0; color: var(--dsw-alias-label-secondary); word-break: break-word; }
 .tdash-mono { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; color: var(--dsw-alias-label-secondary); word-break: break-all; }
-.tdash-foot { padding: 6px 0 2px; text-align: center; color: var(--dsw-alias-label-secondary); font-size: 11px; }
 .tdash-err { padding: 6px 8px; border-radius: 6px; color: var(--dsw-alias-state-error-primary); border: 1px solid var(--dsw-alias-state-error-primary); font-size: 11px; word-break: break-word; }
 `
 
@@ -756,7 +757,8 @@ Keep in mind
           let cancelled = false
           void (async () => {
             try {
-              const value = await call('list', { all: true })
+              const payload = sessionId === '' ? { all: true } : { bySession: true, sessionId }
+              const value = await call('list', payload)
               if (!cancelled) setItems(Array.isArray(value.items) ? value.items : [])
             } catch {
               if (!cancelled) setItems([])
@@ -765,7 +767,7 @@ Keep in mind
           return () => {
             cancelled = true
           }
-        }, [picker === null])
+        }, [picker === null, sessionId])
 
         // This session's own major, and the major it is currently handling.
         const myMajor = items.find((item) => item.origin?.sessionId === sessionId && item.major !== null)?.major
@@ -1197,6 +1199,9 @@ Keep in mind
         const [editingId, setEditingId] = React.useState(null)
         const [editingText, setEditingText] = React.useState('')
         const [pendingDelete, setPendingDelete] = React.useState(null)
+        // One visual card flight at a time. The status write never waits for it.
+        const animatingRef = React.useRef(false)
+        const reflowRef = React.useRef(null)
         // Detail expansion: which cards are open, and the fetched full card by id.
         const [expanded, setExpanded] = React.useState({})
         const [handlingMenu, setHandlingMenu] = React.useState(null)
@@ -1514,19 +1519,176 @@ Keep in mind
         }
 
         /**
-         * Patch optimistically so the control states the new value at once; the
-         * server row replaces it on success and the previous row returns on error.
+         * Let a frozen copy fly into one view tab. The real row changes
+         * immediately; the copy is a short-lived visual and never controls
+         * whether the status write happens.
          */
+        function animateCardToTab(cardElement, viewId, done = undefined) {
+          let copy = null
+          try {
+            const doc = cardElement?.ownerDocument
+            const root = cardElement?.closest('.tdash-root')
+            const target = root?.querySelector(`button[data-view="${viewId}"]`)
+            if (!doc || !root || !target || typeof cardElement.animate !== 'function') return null
+            if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true) return null
+            const from = cardElement.getBoundingClientRect()
+            const to = target.getBoundingClientRect()
+            if (from.width === 0 || from.height === 0 || to.width === 0 || to.height === 0) return null
+            copy = cardElement.cloneNode(true)
+            if (typeof copy.animate !== 'function') return null
+            if (done !== undefined) {
+              const radio = copy.querySelector('.tdash-radio')
+              if (radio !== null) {
+                radio.setAttribute('aria-checked', done ? 'true' : 'false')
+                radio.setAttribute('data-done', done ? 'true' : 'false')
+              }
+            }
+            copy.removeAttribute('id')
+            copy.setAttribute('aria-hidden', 'true')
+            copy.style.position = 'fixed'
+            copy.style.left = `${from.left}px`
+            copy.style.top = `${from.top}px`
+            copy.style.width = `${from.width}px`
+            copy.style.height = `${from.height}px`
+            copy.style.margin = '0'
+            copy.style.pointerEvents = 'none'
+            copy.style.zIndex = '10000'
+            copy.style.transformOrigin = 'center'
+            copy.style.willChange = 'transform, opacity'
+            copy.style.boxShadow = '0 10px 28px rgba(0,0,0,.24)'
+            doc.body.appendChild(copy)
+            const dx = to.left + to.width / 2 - (from.left + from.width / 2)
+            const dy = to.top + to.height / 2 - (from.top + from.height / 2)
+            const flight = copy.animate(
+              [
+                { transform: 'translate(0, 0) scale(1)', opacity: 1, filter: 'blur(0)' },
+                { transform: `translate(${dx * 0.72}px, ${dy * 0.72}px) scale(.38)`, opacity: 0.82, filter: 'blur(.4px)', offset: 0.68 },
+                { transform: `translate(${dx}px, ${dy}px) scale(.04)`, opacity: 0, filter: 'blur(1.2px)' },
+              ],
+              { duration: 430, easing: 'cubic-bezier(.2,.75,.25,1)' },
+            )
+            if (typeof target.animate === 'function') {
+              target.animate(
+                [
+                  { transform: 'scale(1)' },
+                  { transform: 'scale(1.12)' },
+                  { transform: 'scale(1)' },
+                ],
+                { duration: 360, easing: 'ease-out' },
+              )
+            }
+            const cleanup = () => copy.remove()
+            flight.finished.then(cleanup, cleanup)
+            setTimeout(cleanup, 700)
+            return flight
+          } catch {
+            // Animation is optional; the status write must always proceed.
+            try {
+              if (copy !== null && copy.isConnected) copy.remove()
+            } catch {
+              // Cleanup must never replace the original failure.
+            }
+            return null
+          }
+        }
+
+        /** Capture card tops before a removal, so following cards can be animated. */
+        function captureCardTops(body) {
+          if (!body) return undefined
+          const tops = new Map()
+          for (const element of body.querySelectorAll('.tdash-card')) {
+            const id = element.getAttribute('data-row-id')
+            if (id !== null) tops.set(id, element.getBoundingClientRect().top)
+          }
+          return tops
+        }
+
+        /** Give cards below the removed one a short up-then-settle motion. */
+        function animateFollowingCards(body, before, removedTop) {
+          if (!body || body.isConnected === false || before === undefined) return
+          if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true) return
+          for (const element of body.querySelectorAll('.tdash-card')) {
+            const id = element.getAttribute('data-row-id')
+            if (id === null) continue
+            const oldTop = before.get(id)
+            if (oldTop === undefined || oldTop <= removedTop + 1) continue
+            const newTop = element.getBoundingClientRect().top
+            const delta = oldTop - newTop
+            if (delta <= 1) continue
+            try {
+              element.animate(
+                [
+                  { transform: `translateY(${delta}px)` },
+                  { transform: 'translateY(-4px)', offset: 0.72 },
+                  { transform: 'translateY(0)' },
+                ],
+                { duration: 430, easing: 'cubic-bezier(.2,.85,.3,1.18)' },
+              )
+            } catch {
+              // Reflow animation is optional.
+            }
+          }
+        }
+
+        /**
+         * Start the status write immediately, then play the card flight as a
+         * purely visual effect. The write must never depend on the animation.
+         */
+        function moveCardToView(cardElement, rowId, targetView) {
+          if (pendingRef.current !== null) return
+          const card = cardElement?.closest?.('.tdash-card')
+          if (!card) return
+          const body = card.parentElement
+          const willLeave = view !== 'all'
+          // Capture the card and the survivors before the optimistic update
+          // removes this row from the current view. Visual feedback is
+          // optional; the status write below must always run.
+          let flight = null
+          let reflow = null
+          try {
+            const before = willLeave ? captureCardTops(body) : undefined
+            const removedTop = card.getBoundingClientRect().top
+            flight = animatingRef.current ? null : animateCardToTab(card, targetView, targetView === 'done')
+            if (willLeave) reflow = { body, before, removedTop }
+          } catch {
+            // A visual failure must never block the status write.
+          }
+          if (flight !== null) {
+            animatingRef.current = true
+            const release = () => {
+              animatingRef.current = false
+            }
+            if (typeof flight.finished?.then === 'function') flight.finished.then(release, release)
+            else release()
+          }
+          if (reflow !== null) reflowRef.current = reflow
+          patchRow(rowId, { status: targetView === 'done' ? 'done' : 'open' })
+        }
+
+        // Measure the survivors after React has removed the flying card but
+        // before the browser paints, so the reflow starts without a flash.
+        React.useLayoutEffect(() => {
+          const pending = reflowRef.current
+          if (pending === null) return
+          reflowRef.current = null
+          animateFollowingCards(pending.body, pending.before, pending.removedTop)
+        }, [rows])
+
         function patchRow(id, patch) {
           if (pendingRef.current === id) return
           const before = rows.find((row) => row.id === id)
+          const revert = before === undefined
+            ? undefined
+            : Object.fromEntries(Object.keys(patch).map((key) => [key, before[key]]))
           setRows((previous) => previous.map((row) => (row.id === id ? { ...row, ...patch } : row)))
           void writeRow(id, async () => {
             try {
               const value = await call('patch', { id, patch })
               setRows((previous) => previous.map((row) => (row.id === id ? value.item : row)))
             } catch (error) {
-              if (before !== undefined) setRows((previous) => previous.map((row) => (row.id === id ? before : row)))
+              if (revert !== undefined) {
+                setRows((previous) => previous.map((row) => (row.id === id ? { ...row, ...revert } : row)))
+              }
               throw error
             }
           })
@@ -1642,6 +1804,7 @@ Keep in mind
                 key: item.id,
                 type: 'button',
                 className: 'tdash-view',
+                'data-view': item.id,
                 'data-on': view === item.id ? 'true' : 'false',
                 onClick: () => {
                   setView(item.id)
@@ -1973,7 +2136,7 @@ Keep in mind
 
           return h(
             'div',
-            { key: row.id, className: 'tdash-card', 'data-kind': row.kind, 'data-status': row.status, 'data-hit': row.hit === true ? 'true' : 'false' },
+            { key: row.id, className: 'tdash-card', 'data-row-id': row.id, 'data-kind': row.kind, 'data-status': row.status, 'data-hit': row.hit === true ? 'true' : 'false' },
             h(
               'div',
               { className: 'tdash-row1' },
@@ -1985,7 +2148,9 @@ Keep in mind
                 'data-done': done ? 'true' : 'false',
                 'data-dropped': row.status === 'dropped' ? 'true' : 'false',
                 title: t('action.toggleDone'),
-                onClick: () => patchRow(row.id, { status: done ? 'open' : 'done' }),
+                onClick: (event) => {
+                  moveCardToView(event.currentTarget, row.id, done ? 'open' : 'done')
+                },
               }),
               row.label === null || row.label === undefined ? null : h('span', { className: 'tdash-no' }, `#${row.label}`),
               titleNode,
@@ -2005,19 +2170,18 @@ Keep in mind
             h(
               'div',
               { className: 'tdash-footrow' },
-              h('span', { className: 'tdash-kindtag' }, t(KIND_LABEL[row.kind])),
-              meta.length === 0 ? null : h('span', { className: 'tdash-metainline' }, `• ${meta.join(' · ')}`),
               h(
                 'button',
                 {
                   type: 'button',
-                  className: 'tdash-icon',
+                  className: 'tdash-icon tdash-expand',
                   title: t(expanded[row.id] === true ? 'action.collapse' : 'action.expand'),
                   'aria-expanded': expanded[row.id] === true ? 'true' : 'false',
                   onClick: () => toggleDetail(row.id),
                 },
                 h('span', { className: 'tdash-chevron', 'data-open': expanded[row.id] === true ? 'true' : 'false' }),
               ),
+              meta.length === 0 ? null : h('span', { className: 'tdash-metainline' }, meta.join(' · ')),
               h('span', { className: 'tdash-spacer' }),
               tail,
             ),
@@ -2089,7 +2253,6 @@ Keep in mind
             formRow,
             rulesRow,
             body,
-            rows.length > 0 ? h('div', { className: 'tdash-foot' }, fill(t('meta.count'), rows.length)) : null,
           ),
         )
       }

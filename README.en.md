@@ -144,17 +144,22 @@ When an old card has no brief, the plugin derives a read-only brief from `core`,
 as `unknown`, not verified.
 
 The Host stores the developer's original request directly from the user
-message rather than relying on the AI to paraphrase it. This makes it
-easier to spot and correct misunderstandings.
+message rather than relying on the AI to paraphrase it. With a `#DB`/`#MEMO`
+marker, the whole marked block is saved. Without a marker, the AI selects only
+the sentences relevant to this todo. If no excerpt is supplied, a multi-paragraph
+message keeps only its first paragraph; if that paragraph is just a capture
+instruction, no request is saved.
 
 ## Handoff and follow-through
 
 From a card, you can:
 
 -   **Start in a new session:** create a new session seeded with the
-    card's context.
+    card's context. The opening asks the assistant to read the code/materials and present a plan
+    first; it must not modify files until you confirm the plan. When a decision is needed during
+    the work, it uses the DSH question panel in-process instead of waiting until the final reply.
 -   **Insert into the current composer:** prefill a handoff prompt
-    without sending it automatically.
+    without sending it automatically; decisions are also asked during the work.
 
 When the work is finished, the AI should ask whether you want to mark
 the card complete. The status is updated only after you confirm.
@@ -198,6 +203,9 @@ AI to add useful new evidence to a card when appropriate.
     append with `todo_note`;
 -   Short card labels such as `#3.2` for referencing cards in
     conversation;
+-   The `#` card picker: in a normal session, candidates are filtered to the
+    current session's workspace; when the session ID is missing, it falls back
+    to querying all workspaces;
 -   Per-workspace rules, included in new sessions created by the plugin;
 -   Tools for reading cards, appending notes, updating status, listing
     tasks, and retrieving original-session excerpts.
@@ -211,9 +219,10 @@ P0-BASE, T1, T2, T3, and T4 are implemented at the foundation level:
 -   brief-aware duplicate detection (shared file plus title/goal similarity);
 -   version-1 compatibility, brief persistence, and a downgrade-risk simulation.
 
-**Gate 1/T5 has not passed.** The ten scenarios still need real-model and UI verification. New captures with
-no brief and no mustRead/symptom/cause/intent but with only file/source pointers are now rejected with
-`todo/brief-required`; that is not full Gate 1 evidence. Do not describe the current state as Gate 1 passed.
+**Gate 1/T5 has passed the formal acceptance conditions in `docs/PLAN.md` §6. This conclusion applies only to the current uncommitted working tree; it is not a verification of a committed or released version.**
+Evidence: `node scripts/verify-brief.mjs` 117/117, `node scripts/verify-domain.mjs` 193/193, and `git diff --check` pass; among the ten scenarios, 1–9 have real-model/deterministic evidence and scenario 10 is covered by `todo/brief-required` / `todo/brief-source-only` rejection; scenario 7 was retested twice under the latest 3,641-character tool description. Except for scenario 7, the existing evidence for scenarios 1–9 mainly comes from earlier description versions and was not all re-run under the 3,641-character version.
+
+**Not yet verified before release (these do not block the §6 code Gate):** duplicate-prompt visibility and choice in the real DSH UI, real older-version read/write compatibility, backup/restore/upgrade/downgrade/migration/rollback drills, and the scenario C clarification probe. Do not describe release checks as complete until these are done.
 
 Full history retrieval/authorization, brief-first handoff seeds, Project Plan, Markdown import/export, and
 drag-and-drop are not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older
