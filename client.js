@@ -75,13 +75,15 @@ window.__ModuleLoader__.load({
     function readOrderState(scope, view) {
       try {
         const raw = window.localStorage.getItem(orderStorageKey(scope, view))
-        if (raw === null) return { mode: 'time', order: [] }
+        if (raw === null) return { mode: 'time-desc', order: [] }
         const parsed = JSON.parse(raw)
-        const mode = parsed?.mode === 'number' || parsed?.mode === 'manual' ? parsed.mode : 'time'
+        const legacy = parsed?.mode === 'time' ? 'time-desc' : parsed?.mode === 'number' ? 'number-desc' : parsed?.mode
+        const valid = ['time-asc', 'time-desc', 'number-asc', 'number-desc', 'manual']
+        const mode = valid.includes(legacy) ? legacy : 'time-desc'
         const order = Array.isArray(parsed?.order) ? parsed.order.filter((id) => typeof id === 'string' && id !== '') : []
         return { mode, order: mode === 'manual' ? order : [] }
       } catch {
-        return { mode: 'time', order: [] }
+        return { mode: 'time-desc', order: [] }
       }
     }
 
@@ -104,7 +106,11 @@ window.__ModuleLoader__.load({
       'sort.time': '时间',
       'sort.number': '编号',
       'sort.manual': '手动',
-      'sort.tip': '切换按时间/编号排序；拖拽后固定为手动顺序',
+      'sort.tip': '选择排序方式',
+      'sort.timeAsc': '时间 ↑',
+      'sort.timeDesc': '时间 ↓',
+      'sort.numberAsc': '编号 ↑',
+      'sort.numberDesc': '编号 ↓',
       'view.open': '未完成',
       'view.all': '全部',
       'view.defect': '待修复',
@@ -264,7 +270,11 @@ window.__ModuleLoader__.load({
       'sort.time': 'Time',
       'sort.number': 'Number',
       'sort.manual': 'Manual',
-      'sort.tip': 'Toggle time/number sorting; dragging fixes a manual order',
+      'sort.tip': 'Choose sorting',
+      'sort.timeAsc': 'Time ↑',
+      'sort.timeDesc': 'Time ↓',
+      'sort.numberAsc': 'Number ↑',
+      'sort.numberDesc': 'Number ↓',
       'view.open': 'Unfinished',
       'view.all': 'All',
       'view.defect': 'To fix',
@@ -468,11 +478,15 @@ Keep in mind
 .tdash-topx .tdash-x { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; line-height: 1; transform: translateY(-1px); }
 .tdash-rules-btn { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
 .tdash-sort-btn { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
-.tdash-sort-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tdash-sort-btn:hover, .tdash-sort-btn[data-on="true"] { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-sort-btn:disabled { opacity: .55; cursor: default; }
+.tdash-sort-wrap { position: relative; flex: 0 0 auto; }
+.tdash-sort-pop { position: absolute; top: calc(100% + 4px); right: 0; z-index: 50; min-width: 108px; padding: 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-overlay); box-shadow: 0 8px 24px rgba(0,0,0,.18); display: flex; flex-direction: column; gap: 2px; }
+.tdash-sort-opt { border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; line-height: 18px; text-align: left; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
+.tdash-sort-opt:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tdash-sort-opt[data-on="true"] { background: var(--dsw-alias-bg-layer-2); }
 .tdash-card[draggable="true"] { cursor: grab; }
 .tdash-card[data-dragging="true"] { opacity: .55; cursor: grabbing; }
-.tdash-card[data-drop-target="true"] { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
 .tdash-rules-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-info { flex: 0 0 auto; box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
 .tdash-info:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -1301,21 +1315,33 @@ Keep in mind
         const [expanded, setExpanded] = React.useState({})
         const [details, setDetails] = React.useState({})
         // Manual order is per workspace bucket + view; a drag turns sorting off.
-        const [sortMode, setSortMode] = React.useState('time')
+        const [sortMode, setSortMode] = React.useState('time-desc')
+        const [sortOpen, setSortOpen] = React.useState(false)
         const [manualOrder, setManualOrder] = React.useState([])
         const [draggingId, setDraggingId] = React.useState(null)
-        const [dropTargetId, setDropTargetId] = React.useState(null)
         const orderBeforeRef = React.useRef(null)
         const dragIdRef = React.useRef(null)
+        const lastDragTargetRef = React.useRef(null)
 
         React.useEffect(() => {
           const saved = readOrderState(scope, view)
           setSortMode(saved.mode)
           setManualOrder(saved.order)
           setDraggingId(null)
-          setDropTargetId(null)
+          setSortOpen(false)
+          lastDragTargetRef.current = null
           dragIdRef.current = null
         }, [scope, view])
+
+        React.useEffect(() => {
+          if (!sortOpen) return undefined
+          const onDown = (event) => {
+            if (event.target instanceof Element && event.target.closest('.tdash-sort-wrap') !== null) return
+            setSortOpen(false)
+          }
+          document.addEventListener('mousedown', onDown, true)
+          return () => document.removeEventListener('mousedown', onDown, true)
+        }, [sortOpen])
 
         // FLIP the cards when a drag changes their order.
         React.useLayoutEffect(() => {
@@ -1325,7 +1351,7 @@ Keep in mind
           if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true) return
           for (const element of document.querySelectorAll('.tdash-card')) {
             const id = element.getAttribute('data-row-id')
-            if (id === null) continue
+            if (id === null || id === dragIdRef.current) continue
             const oldTop = before.get(id)
             if (oldTop === undefined) continue
             const newTop = element.getBoundingClientRect().top
@@ -2010,8 +2036,9 @@ Keep in mind
           return row.kind === view
         })
 
-        const byTime = (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || (b.createdAt ?? 0) - (a.createdAt ?? 0)
-        const byNumber = (a, b) => (b.major ?? -1) - (a.major ?? -1) || (b.minor ?? -1) - (a.minor ?? -1)
+        const sortDirection = sortMode.endsWith('-asc') ? 1 : -1
+        const byTime = (a, b) => ((a.updatedAt ?? 0) - (b.updatedAt ?? 0) || (a.createdAt ?? 0) - (b.createdAt ?? 0)) * sortDirection
+        const byNumber = (a, b) => ((a.major ?? -1) - (b.major ?? -1) || (a.minor ?? -1) - (b.minor ?? -1)) * sortDirection
         const manualRank = new Map(manualOrder.map((id, index) => [id, index]))
         const shownSorted = [...shown].sort((a, b) => {
           if (sortMode === 'manual') {
@@ -2021,15 +2048,21 @@ Keep in mind
             if (left !== undefined) return -1
             if (right !== undefined) return 1
           }
-          return sortMode === 'number' ? byNumber(a, b) : byTime(a, b)
+          return sortMode.startsWith('number') ? byNumber(a, b) : byTime(a, b)
         })
+        const sortLabelOf = (mode) => {
+          if (mode === 'manual') return t('sort.manual')
+          if (mode === 'time-asc') return t('sort.timeAsc')
+          if (mode === 'time-desc') return t('sort.timeDesc')
+          if (mode === 'number-asc') return t('sort.numberAsc')
+          return t('sort.numberDesc')
+        }
 
-        function cycleSort() {
-          if (sortMode === 'manual') return
-          const next = sortMode === 'time' ? 'number' : 'time'
-          setSortMode(next)
+        function chooseSort(mode) {
+          setSortMode(mode)
           setManualOrder([])
-          storeOrderState(scope, view, next, [])
+          setSortOpen(false)
+          storeOrderState(scope, view, mode, [])
         }
 
         function applyManualOrder(ids) {
@@ -2043,6 +2076,7 @@ Keep in mind
           if (before !== undefined) orderBeforeRef.current = before
           setSortMode('manual')
           setManualOrder(ids)
+          setSortOpen(false)
           storeOrderState(scope, view, 'manual', ids)
           setRows(nextRows)
         }
@@ -2053,14 +2087,19 @@ Keep in mind
             return
           }
           dragIdRef.current = row.id
+          lastDragTargetRef.current = null
           setDraggingId(row.id)
-          setDropTargetId(null)
+          setSortOpen(false)
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) {
             event.dataTransfer.effectAllowed = 'move'
             try {
               event.dataTransfer.setData('text/plain', row.id)
+              // Hide the native drag image; the card itself is the drag feedback.
+              const blank = document.createElement('img')
+              blank.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+              event.dataTransfer.setDragImage(blank, 0, 0)
             } catch {
-              // Some browsers reject custom drag data; order still works in-session.
+              // Some browsers reject custom drag data/image; order still works in-session.
             }
           }
         }
@@ -2069,10 +2108,17 @@ Keep in mind
           if (dragIdRef.current === null || dragIdRef.current === rowId) return
           event.preventDefault()
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) event.dataTransfer.dropEffect = 'move'
-          setDropTargetId(rowId)
+          if (lastDragTargetRef.current === rowId) return
           const from = shownSorted.findIndex((row) => row.id === dragIdRef.current)
           const to = shownSorted.findIndex((row) => row.id === rowId)
           if (from < 0 || to < 0 || from === to) return
+          // Reorder only after the pointer crosses the target's midpoint in the
+          // direction of travel. This prevents cards from swapping back and forth.
+          const rect = event.currentTarget.getBoundingClientRect()
+          const middle = rect.top + rect.height / 2
+          if (from < to && event.clientY < middle) return
+          if (from > to && event.clientY > middle) return
+          lastDragTargetRef.current = rowId
           const ids = shownSorted.map((row) => row.id)
           const [moved] = ids.splice(from, 1)
           ids.splice(to, 0, moved)
@@ -2081,8 +2127,8 @@ Keep in mind
 
         function finishDrag() {
           dragIdRef.current = null
+          lastDragTargetRef.current = null
           setDraggingId(null)
-          setDropTargetId(null)
         }
 
         const scopeOptions = [
@@ -2125,16 +2171,41 @@ Keep in mind
                 t('rules.title'),
               ),
           h(
-            'button',
-            {
-              type: 'button',
-              className: 'tdash-sort-btn',
-              title: t('sort.tip'),
-              'aria-label': t('sort.tip'),
-              disabled: sortMode === 'manual',
-              onClick: cycleSort,
-            },
-            `${t('sort.label')} · ${t(sortMode === 'time' ? 'sort.time' : sortMode === 'number' ? 'sort.number' : 'sort.manual')}`,
+            'div',
+            { className: 'tdash-sort-wrap' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'tdash-sort-btn',
+                title: t('sort.tip'),
+                'aria-label': t('sort.tip'),
+                'aria-expanded': sortOpen ? 'true' : 'false',
+                'data-on': sortOpen ? 'true' : 'false',
+                onClick: () => setSortOpen((open) => !open),
+              },
+              `${t('sort.label')} · ${sortLabelOf(sortMode)}`,
+            ),
+            sortOpen
+              ? h(
+                  'div',
+                  { className: 'tdash-sort-pop', role: 'menu' },
+                  ['time-asc', 'time-desc', 'number-asc', 'number-desc'].map((mode) =>
+                    h(
+                      'button',
+                      {
+                        key: mode,
+                        type: 'button',
+                        className: 'tdash-sort-opt',
+                        role: 'menuitem',
+                        'data-on': sortMode === mode ? 'true' : 'false',
+                        onClick: () => chooseSort(mode),
+                      },
+                      sortLabelOf(mode),
+                    ),
+                  ),
+                )
+              : null,
           ),
           h(
             'button',
@@ -2502,7 +2573,6 @@ Keep in mind
               'data-kind': row.kind,
               'data-status': row.status,
               'data-dragging': draggingId === row.id ? 'true' : 'false',
-              'data-drop-target': dropTargetId === row.id ? 'true' : 'false',
               draggable: true,
               onDragStart: (event) => beginDrag(row, event),
               onDragOver: (event) => dragOverRow(row.id, event),
