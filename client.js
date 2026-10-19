@@ -486,7 +486,9 @@ Keep in mind
 .tdash-sort-opt:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-sort-opt[data-on="true"] { background: var(--dsw-alias-bg-layer-2); }
 .tdash-card[draggable="true"] { cursor: grab; }
-.tdash-card[data-dragging="true"] { opacity: .55; cursor: grabbing; }
+.tdash-card[data-dragging="true"] { opacity: .35; cursor: grabbing; outline: 2px dashed var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.tdash-card[data-drop-position="before"] { box-shadow: 0 -2px 0 var(--dsw-alias-brand-primary); }
+.tdash-card[data-drop-position="after"] { box-shadow: 0 2px 0 var(--dsw-alias-brand-primary); }
 .tdash-rules-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-info { flex: 0 0 auto; box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
 .tdash-info:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -1319,17 +1321,19 @@ Keep in mind
         const [sortOpen, setSortOpen] = React.useState(false)
         const [manualOrder, setManualOrder] = React.useState([])
         const [draggingId, setDraggingId] = React.useState(null)
+        const [dropTarget, setDropTarget] = React.useState(null)
         const orderBeforeRef = React.useRef(null)
         const dragIdRef = React.useRef(null)
-        const lastDragTargetRef = React.useRef(null)
+        const dropTargetRef = React.useRef(null)
 
         React.useEffect(() => {
           const saved = readOrderState(scope, view)
           setSortMode(saved.mode)
           setManualOrder(saved.order)
           setDraggingId(null)
+          setDropTarget(null)
           setSortOpen(false)
-          lastDragTargetRef.current = null
+          dropTargetRef.current = null
           dragIdRef.current = null
         }, [scope, view])
 
@@ -2087,19 +2091,41 @@ Keep in mind
             return
           }
           dragIdRef.current = row.id
-          lastDragTargetRef.current = null
+          dropTargetRef.current = null
           setDraggingId(row.id)
+          setDropTarget(null)
           setSortOpen(false)
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) {
             event.dataTransfer.effectAllowed = 'move'
             try {
               event.dataTransfer.setData('text/plain', row.id)
-              // Hide the native drag image; the card itself is the drag feedback.
-              const blank = document.createElement('img')
-              blank.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
-              event.dataTransfer.setDragImage(blank, 0, 0)
+              // A lifted clone follows the pointer; no native translucent ghost.
+              const cardElement = event.currentTarget
+              const rect = cardElement.getBoundingClientRect()
+              const clone = cardElement.cloneNode(true)
+              clone.removeAttribute('data-row-id')
+              clone.setAttribute('aria-hidden', 'true')
+              clone.style.position = 'fixed'
+              clone.style.left = '-2000px'
+              clone.style.top = '0'
+              clone.style.width = `${rect.width}px`
+              clone.style.height = `${rect.height}px`
+              clone.style.opacity = '0.92'
+              clone.style.pointerEvents = 'none'
+              clone.style.zIndex = '10000'
+              clone.style.boxShadow = '0 12px 30px rgba(0,0,0,.28)'
+              document.body.appendChild(clone)
+              event.dataTransfer.setDragImage(clone, Math.max(0, event.clientX - rect.left), Math.max(0, event.clientY - rect.top))
+              setTimeout(() => clone.remove(), 0)
             } catch {
-              // Some browsers reject custom drag data/image; order still works in-session.
+              // If a custom image is rejected, at least suppress the native ghost.
+              try {
+                const blank = document.createElement('img')
+                blank.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+                event.dataTransfer.setDragImage(blank, 0, 0)
+              } catch {
+                // Ordering still works without a drag image.
+              }
             }
           }
         }
@@ -2108,27 +2134,39 @@ Keep in mind
           if (dragIdRef.current === null || dragIdRef.current === rowId) return
           event.preventDefault()
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) event.dataTransfer.dropEffect = 'move'
-          if (lastDragTargetRef.current === rowId) return
-          const from = shownSorted.findIndex((row) => row.id === dragIdRef.current)
-          const to = shownSorted.findIndex((row) => row.id === rowId)
-          if (from < 0 || to < 0 || from === to) return
-          // Reorder only after the pointer crosses the target's midpoint in the
-          // direction of travel. This prevents cards from swapping back and forth.
           const rect = event.currentTarget.getBoundingClientRect()
-          const middle = rect.top + rect.height / 2
-          if (from < to && event.clientY < middle) return
-          if (from > to && event.clientY > middle) return
-          lastDragTargetRef.current = rowId
+          const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+          const current = dropTargetRef.current
+          if (current !== null && current.id === rowId && current.position === position) return
+          const next = { id: rowId, position }
+          dropTargetRef.current = next
+          setDropTarget(next)
+        }
+
+        function dropOnRow(rowId, event) {
+          event.preventDefault()
+          const target = dropTargetRef.current
+          const dragged = dragIdRef.current
+          finishDrag()
+          if (target === null || dragged === null || target.id !== rowId) return
+          if (dragged === rowId) return
+          const from = shownSorted.findIndex((row) => row.id === dragged)
+          const to = shownSorted.findIndex((row) => row.id === rowId)
+          if (from < 0 || to < 0) return
           const ids = shownSorted.map((row) => row.id)
           const [moved] = ids.splice(from, 1)
-          ids.splice(to, 0, moved)
+          const targetIndex = ids.indexOf(rowId)
+          if (targetIndex < 0) return
+          ids.splice(target.position === 'after' ? targetIndex + 1 : targetIndex, 0, moved)
+          if (ids.every((id, index) => id === shownSorted[index]?.id)) return
           applyManualOrder(ids)
         }
 
         function finishDrag() {
           dragIdRef.current = null
-          lastDragTargetRef.current = null
+          dropTargetRef.current = null
           setDraggingId(null)
+          setDropTarget(null)
         }
 
         const scopeOptions = [
@@ -2573,13 +2611,11 @@ Keep in mind
               'data-kind': row.kind,
               'data-status': row.status,
               'data-dragging': draggingId === row.id ? 'true' : 'false',
+              'data-drop-position': dropTarget !== null && dropTarget.id === row.id ? dropTarget.position : undefined,
               draggable: true,
               onDragStart: (event) => beginDrag(row, event),
               onDragOver: (event) => dragOverRow(row.id, event),
-              onDrop: (event) => {
-                event.preventDefault()
-                finishDrag()
-              },
+              onDrop: (event) => dropOnRow(row.id, event),
               onDragEnd: finishDrag,
             },
             h(
@@ -2677,7 +2713,16 @@ Keep in mind
           viewRow,
           h(
             'div',
-            { className: 'tdash-body' },
+            {
+              className: 'tdash-body',
+              onDragOver: (event) => {
+                if (dragIdRef.current !== null) event.preventDefault()
+              },
+              onDrop: (event) => {
+                event.preventDefault()
+                finishDrag()
+              },
+            },
             errorText !== '' && phase !== 'error' ? h('div', { className: 'tdash-err' }, errorText) : null,
             helpOpen
               ? h(
