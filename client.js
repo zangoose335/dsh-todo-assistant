@@ -487,7 +487,9 @@ Keep in mind
 .tdash-sort-opt[data-on="true"] { background: var(--dsw-alias-bg-layer-2); }
 .tdash-card[draggable="true"] { cursor: grab; }
 .tdash-card[data-dragging="true"] { opacity: .35; cursor: grabbing; outline: 2px dashed var(--dsw-alias-brand-primary); outline-offset: 2px; }
-.tdash-drop-line { position: relative; z-index: 5; flex: 0 0 auto; height: 2px; margin: -7px 0; border-radius: 2px; background: var(--dsw-alias-brand-primary); pointer-events: none; }
+.tdash-drop-line { position: absolute; left: 0; right: 0; z-index: 6; height: 2px; border-radius: 2px; background: var(--dsw-alias-brand-primary); pointer-events: none; }
+.tdash-drop-line[data-position="before"] { top: -4px; }
+.tdash-drop-line[data-position="after"] { bottom: -4px; }
 .tdash-rules-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-info { flex: 0 0 auto; box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
 .tdash-info:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -2558,7 +2560,7 @@ Keep in mind
           return h('div', { className: 'tdash-detail' }, ...blocks)
         }
 
-        function card(row) {
+        function card(row, dropLine = null) {
           const meta = []
           // Files win over the request text: both at once is noise.
           if (row.touchedFileCount > 0) meta.push(fill(t('meta.files'), row.touchedFileCount))
@@ -2616,6 +2618,7 @@ Keep in mind
               onDragStart: (event) => beginDrag(row, event),
               onDragEnd: finishDrag,
             },
+            dropLine === null ? null : h('span', { className: 'tdash-drop-line', 'data-position': dropLine, 'aria-hidden': 'true' }),
             h(
               'div',
               { className: 'tdash-row1' },
@@ -2701,14 +2704,14 @@ Keep in mind
             h('div', null, t('empty.hint')),
           )
         } else {
-          const cards = shownSorted.map(card)
-          body = []
-          for (let index = 0; index <= cards.length; index += 1) {
-            if (draggingId !== null && dropIndex === index) {
-              body.push(h('div', { key: `drop-${index}`, className: 'tdash-drop-line', 'aria-hidden': 'true' }))
-            }
-            if (index < cards.length) body.push(cards[index])
-          }
+          const dragFrom = draggingId === null ? -1 : shownSorted.findIndex((row) => row.id === draggingId)
+          const showLine = draggingId !== null && dropIndex !== null && dropIndex !== dragFrom && dropIndex !== dragFrom + 1
+          body = shownSorted.map((row, index) => {
+            if (!showLine) return card(row)
+            if (index === dropIndex) return card(row, 'before')
+            if (dropIndex === shownSorted.length && index === shownSorted.length - 1) return card(row, 'after')
+            return card(row)
+          })
         }
 
         return h(
