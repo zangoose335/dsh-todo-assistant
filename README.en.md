@@ -218,14 +218,14 @@ AI to add useful new evidence to a card when appropriate.
 
 ## Current stage and limits
 
-P0-BASE and T1–T4 foundation work are implemented. T5/Gate 1 was strictly re-reviewed on 2026-10-19 and **did not pass**:
+P0-BASE and T1–T4 foundation work are implemented. T5/Gate 1 was strictly re-reviewed, semantically fixed, and runtime-accepted on 2026-10-19: **PASS with scope limits**:
 
 -   TaskBrief creation, persistence, reading, legacy derivation, and sidebar display;
 -   the `brief.nextAction` / legacy `nextStep` contract: brief-only and legacy-nextStep-only captures both work, and a conflict resolves to the brief with a warning;
 -   brief-aware duplicate detection (shared file plus title/goal similarity);
 -   version-1 compatibility; the real old code at `be8ebf4` drops `brief` and `sources` when it writes back.
 
-**Gate 1/T5 still did not pass (strict review plus semantic fix, 2026-10-19).** Deterministic coverage and the semantic probes now pass, but real-runtime acceptance is incomplete.
+**Gate 1/T5 passes (PASS, with scope limits; strict review + semantic fix + real-runtime acceptance, 2026-10-19).**
 Evidence: `node scripts/verify-brief.mjs` 118/118, `node scripts/verify-domain.mjs` 262/262, `node scripts/verify-recall.mjs` 35/35,
 `node scripts/verify-gate1.mjs` 63/63 (S1–S10 39/39), `node scripts/verify-legacy.mjs` 11/11, and `git diff --check` pass.
 All deterministic §8.0 scenarios S1–S10 pass. After unifying the `blocking` definition, S3/S4/S5/S6/S9 pass again; the isolated semantic probe is now 10/10.
@@ -234,7 +234,7 @@ See `docs/GATE1-T5-ACCEPTANCE.md`.
 
 **Gate 1 UI smoke has been verified by the developer (2026-10-19):** the workspace filter in the `#` picker, completion/reverse animation, reduced motion, narrow layout, and the duplicate prompt showed no issues. That smoke test is not the ten-scenario semantic acceptance.
 
-**Still unverified (now Gate 1 blockers):** S9 behavior after the real duplicate gate; the ten scenarios in the real UI and a real `todo_recall` trace; the old published plugin reading/writing in the real UI; a real user-storage backup/restore/upgrade/downgrade/migration/rollback drill; and a real-model retest of scenario 10. The field-semantics issues are fixed and no longer blockers.
+**Scope limits:** the old-plugin UI and storage write-back were exercised on a copy/test workspace, not a destructive drill on the real `~/.dsh`; S9 needs an explicit pointer to #6.25; S2 has a duplicate constraint and S7 is slightly above minimal. The real UI ten scenarios, real `todo_recall`, old-plugin UI, storage copy, and scenario 10 are verified.
 
 Full history retrieval/authorization, brief-first handoff seeds, Project Plan, Markdown import/export, and
 drag-and-drop are not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older

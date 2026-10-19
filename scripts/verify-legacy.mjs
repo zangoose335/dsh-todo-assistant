@@ -29,7 +29,7 @@ const INSTALL_ROOT = process.env.DSH_INSTALL_ROOT ?? '/opt/homebrew/lib/node_mod
 const MODULES = join(INSTALL_ROOT, 'node_modules')
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = dirname(HERE)
-const FIXTURE = join(HERE, 'fixtures', 'todo_assistant.v1.json')
+const FIXTURE = process.env.GATE1_FIXTURE ?? join(HERE, 'fixtures', 'todo_assistant.v1.json')
 const OLD_COMMIT = process.env.TODO_LEGACY_COMMIT ?? 'be8ebf4'
 
 const load = (relative) => import(pathToFileURL(join(MODULES, relative)).href)

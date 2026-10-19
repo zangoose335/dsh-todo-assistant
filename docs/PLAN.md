@@ -858,7 +858,7 @@ graph TD
 | T2 当前上下文提炼 | 已完成基础实现；语义探针已修复并复跑通过 | 提示词、六类 basis、质量 warning；2026-10-19 修复 constraints/confirmed 混用、impact 低估、合并未先确认等问题；真实工具调用轨迹仍未验证 |
 | T3 去重质量 | 已完成基础实现；duplicate UI 已由开发者验证（2026-10-19） | 共享文件 + 标题/目标相似度；不同目标保护；duplicate 返回候选、`forceCreate` 确认创建、`todo_note` 确认补充 |
 | T4 数据兼容 | 基础实现 + 真实旧代码探针；旧插件 UI 未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；另外用 `be8ebf4` 真实旧代码验证 `brief` 与 `sources` 会被 strip/写回丢失；**仍不是旧插件在真实 UI 中运行** |
-| T5 / Gate 1 | **仍未通过（语义已修复，真实运行未验收）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；修正后隔离语义探针 10/10 通过；场景 10 确定性拒绝通过但真实运行时未复测；详见 `docs/GATE1-T5-ACCEPTANCE.md` |
+| T5 / Gate 1 | **通过（PASS，带范围限制）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；修正后隔离语义探针 10/10 通过；真实 UI、`todo_recall`、旧插件 UI、存储副本和场景 10 均已验证；详见 `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md` |
 
 验证基线（源码 `2839fe9` + 本次未提交的验收改动）：
 
@@ -869,7 +869,7 @@ graph TD
 - `node scripts/verify-legacy.mjs` → **11/11**（真实旧代码 `be8ebf4`）
 - `git diff --check` → **通过**
 
-运行时时序：2026-10-19 严格复核时 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；统一 blocking 语义后为 **6129** 字符（sha256 `8fa6fbad…`）。S3/S4/S5/S6/S9 已复跑通过；Gate 1 仍因真实 UI/旧插件/存储未验收而**未通过**。
+运行时时序：2026-10-19 严格复核时 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；统一 blocking 语义并补 back-reference 规则后为 **6456** 字符（sha256 `83de5a20…`）。S3/S4/S5/S6/S9 已复跑通过；真实运行验收已在 `docs/GATE1-RUNTIME-ACCEPTANCE.md` 补齐。
 
 T5 语义探针结果（2026-10-19，隔离模式；原始输出见 `docs/GATE1-T5-PROBES.json`）：
 
@@ -895,7 +895,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 4. 真实用户存储的备份、恢复、升级、降级、迁移和回滚演练；
 5. 场景 10 的真实模型复测（确定性拒绝已通过，隔离探针选择先问）。
 
-> **Gate 1 状态：仍未通过（按 §6 严格条件，2026-10-19 复核并修复语义后）。** 确定性验收与 T1–T4 基础实现已完成；语义探针已修复并复跑 10/10 通过；真实运行时/旧插件 UI/真实存储仍未验收，仍是 §6 Gate 1 的未完成条件。
+> **Gate 1 状态：通过（PASS，带范围限制，2026-10-19）。** 确定性验收、语义探针、真实 DSH UI、真实 `todo_recall`、旧插件 UI（副本/测试工作区）、存储副本和场景 10 均已验证；限制见 `docs/GATE1-RUNTIME-ACCEPTANCE.md`。
 
 ### 阶段 2：历史情报补全（A，后续阶段）
 
@@ -1490,7 +1490,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 **Gate 1 通过前，不启动 A/B/C/D/E 的产品实现。**
 
-> **Gate 1 状态（2026-10-19 严格复核并修复）：仍未通过。** T1–T4 基础实现、§8.0 确定性和修正后语义探针（10/10）已通过；真实 UI/`todo_recall` 轨迹、旧插件 UI 和真实存储仍未验收。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
+> **Gate 1 状态（2026-10-19 严格复核并修复）：通过（PASS，带范围限制）。** T1–T4 基础实现、§8.0 确定性、修正后语义探针（10/10）和真实运行验收均已通过。详见 `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`。
 
 ### Gate 2：历史情报补全（Stage 2，后续）
 
@@ -1504,7 +1504,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - 现有 184 项 + Gate 1 测试不回归。
 - 本 Gate 是辅助能力，不反向要求 Stage 1 变更；可延后。
 
-> **Gate 2 状态（2026-10-19）：通过（PASS，带已记录限制）。** 详情见 `docs/GATE2-REVIEW.md`；探针结果见 `docs/A6-A4-PROBES.md`。T1–T4 行为/审批实测；T5 的 Gate 1 严格复核未通过（见 `docs/GATE1-T5-ACCEPTANCE.md`），Gate 2 的通过不改变这一结论。T6 由 C2/C2b 覆盖，T7/T10 使用自动代理，T8/T9 自动+实测；A4 C2b/C3/C4 通过，C1 夹具无效但明确替代由 C2b 覆盖；建卡前 `session:current` 已实现并通过真实审批；append-on-read 已被方案 A 取代；T7/T10 无独立模型会话、无精确 TokenUsage、审批取消/不可用依赖 DSH 契约。
+> **Gate 2 状态（2026-10-19）：通过（PASS，带已记录限制）。** 详情见 `docs/GATE2-REVIEW.md`；探针结果见 `docs/A6-A4-PROBES.md`。T1–T4 行为/审批实测；T5 的 Gate 1 严格复核已在修复语义并补齐真实运行后通过（见 `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`）。T6 由 C2/C2b 覆盖，T7/T10 使用自动代理，T8/T9 自动+实测；A4 C2b/C3/C4 通过，C1 夹具无效但明确替代由 C2b 覆盖；建卡前 `session:current` 已实现并通过真实审批；append-on-read 已被方案 A 取代；T7/T10 无独立模型会话、无精确 TokenUsage、审批取消/不可用依赖 DSH 契约。
 
 ### Gate 3：任务交接质量（Stage 3，后续）
 
@@ -1532,7 +1532,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - DESIGN 更新新模型、MVP 范围、测试计数、已知偏差。
 - 每个 Gate 完成后同步对应文档，而不是最后一次性补。
 
-> **Gate Docs 状态（2026-10-19 严格复核）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险与当前测试计数；`docs/GATE1-T5-ACCEPTANCE.md` 记录十场景逐项结果。Gate 1 UI 冒烟已由开发者验证，但 Gate 1 当前**未通过**；剩余阻塞项见 §T5。
+> **Gate Docs 状态（2026-10-19 严格复核）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险与当前测试计数；`docs/GATE1-T5-ACCEPTANCE.md` 记录十场景逐项结果。Gate 1 UI 冒烟和真实运行验收均已完成；Gate 1 当前**通过（带范围限制）**。
 
 ---
 
@@ -1592,7 +1592,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 > Gate 1 的核心验收表。场景 10 是**强制失败用例**：任何“来源指针完整、任务简报为空/只有标题路径”的卡片都不得通过。表中“额外调查”指是否需要历史读取；Stage 1 默认不读取历史。
 >
-> **2026-10-19 复核结果**：确定性 S1–S10 通过（39/39；脚本总计 63/63）；修正后隔离语义探针 10/10 通过。逐项证据与未验证项见 `docs/GATE1-T5-ACCEPTANCE.md`；Gate 1 当前**仍未通过**，但阻塞项只剩真实运行时/旧插件/存储。
+> **2026-10-19 复核结果**：确定性 S1–S10 通过（39/39；脚本总计 63/63）；修正后隔离语义探针 10/10 通过；真实运行验收也已补齐。逐项证据见 `docs/GATE1-T5-ACCEPTANCE.md` 和 `docs/GATE1-RUNTIME-ACCEPTANCE.md`；Gate 1 **通过（带范围限制）**。
 
 T5 必须优先验证：
 

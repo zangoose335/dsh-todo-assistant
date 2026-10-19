@@ -14,8 +14,8 @@
 | A3 当前可见优先、gap-first、开头 5 轮、停止条件、审批、标记不授权历史 | 部分通过 | first-batch、surface、stop、审批、gap/reason、建卡前 `session:current` 已实现并有自动测试；真实 `session:current` first-batch 审批通过，目录 120 条上限；允许/拒绝已真实通过；取消 UI 无按钮，unavailable 属 DSH fail-closed 契约 |
 | A4 sourceIds/where、历史冲突、superseded | 通过（C1 夹具无效） | sourceIds/basis/role 链路已有；C2b 明确替代→superseded、C3 无来源 warning、C4 推断不当事实均通过；C1 夹具与仓库不符，明确替代由 C2b 覆盖 |
 | A5 observed 文件校验、文档核对指引 | 通过（含已接受的降级） | 文件 source、purpose、observed/verified、种子核对提醒已实现；没有自动文件存在性检查，按约定交给后续会话核对 |
-| A6 历史 10 项 + Token 10 场景 + 累计成本指标 | 通过（带代理限制） | T1→T4 行为/审批实测；T5 的 Gate 1 严格复核未通过（见 `docs/GATE1-T5-ACCEPTANCE.md`）；T6 由 C2/C2b 覆盖；T7/T10 使用自动代理（目录 cap/不可用反馈）；T8/T9 自动+实测；尚无精确 TokenUsage，只用代理字段 |
-| 现有 184 + Gate 1 回归 | 通过（仅确定性） | `verify-brief` 118/118、`verify-domain` 262/262、`verify-gate1` 63/63；T5 语义验收未通过，不能表述为 Gate 1 通过 |
+| A6 历史 10 项 + Token 10 场景 + 累计成本指标 | 通过（带代理限制） | T1→T4 行为/审批实测；T5 的 Gate 1 已通过（见 `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`）；T6 由 C2/C2b 覆盖；T7/T10 使用自动代理（目录 cap/不可用反馈）；T8/T9 自动+实测；尚无精确 TokenUsage，只用代理字段 |
+| 现有 184 + Gate 1 回归 | 通过（仅确定性） | `verify-brief` 118/118、`verify-domain` 262/262、`verify-gate1` 63/63；T5 语义与真实运行验收已通过；范围限制见 `docs/GATE1-RUNTIME-ACCEPTANCE.md` |
 | 文档同步 | 部分通过 | 本报告与测试矩阵已加；PLAN/DESIGN 计数与方案 A 口径已同步；行为探针记录仍未补全 |
 
 ## 已记录限制（不阻塞 Gate 2，但不能说成无限制）
