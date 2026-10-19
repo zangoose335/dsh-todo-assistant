@@ -149,8 +149,9 @@ window.__ModuleLoader__.load({
       'seed.briefWarnings': '简报提示',
       'seed.noHistory': '不要自动读取历史；如确需回读，先说明缺口并按 Stage 2 审批。',
       'seed.ask': '接到任务后，遇到不明白、信息不足或暧昧不清的地方，主动向用户提问，不要自行猜测。',
+      'seed.cardId': '提到某张卡时，先使用待办助理里显示的编号（如 #6.12）；如果需要内部 id，写成“#6.12（td_45rb）”，不要只写内部 id，否则用户不知道你在说哪张卡；不要编造卡片编号，不确定是否存在时先确认。',
       'handling.briefHeader': '这是已有卡片 #{id}「{title}」的任务简报，不要重复建卡。',
-      'handling.briefNote': '如果其中有不明白或暧昧不清的地方，先向我提问；需要更多细节用 todo_read #{id}。',
+      'handling.briefNote': '如果其中有不明白或暧昧不清的地方，先向我提问；提到卡片时先用待办助理显示的编号，内部 id 放括号；需要更多细节用 todo_read #{id}。',
       'source.doc': '文档',
       'source.code': '代码',
       'seed.hint': '（需要更多细节用 todo_read #{id}；有新发现用 todo_note 追加，不要重写卡片；本轮先只读代码和现有资料并给出方案，不要修改任何文件；方案经开发者确认后再开始实现。处理过程中如果需要开发者做决定、确认方案或补充信息，使用 DSH 的 ask_user_question 工具在过程中提问并等待回答，不要自行决定，也不要把问题留到完成后的回复。完成后主动问开发者是否把 #{id} 标记为完成，确认后再调 todo_status。）',
@@ -187,7 +188,7 @@ window.__ModuleLoader__.load({
       'rules.save': '保存',
       'rules.saved': '已保存',
       'rules.empty': '这个工作区还没有规则',
-      'handling.insert': '现在切到待办 #{id}「{title}」：先用 todo_read 读它，再按里面的「下一步」继续；遇到不明白或暧昧不清的地方，主动用 DSH 的 ask_user_question 问我并等待回答，不要自行猜测，也不要把问题留到最后；改完后问我是否标记完成。',
+      'handling.insert': '现在切到待办 #{id}「{title}」：先用 todo_read 读它，再按里面的「下一步」继续；提到卡片时先用待办助理显示的编号，需要内部 id 就写成“显示编号（内部 id）”；遇到不明白或暧昧不清的地方，主动用 DSH 的 ask_user_question 问我并等待回答，不要自行猜测，也不要把问题留到最后；改完后问我是否标记完成。',
       'handling.boundTo': '由会话 {id} 处理',
       'action.expand': '展开详情',
       'action.collapse': '收起详情',
@@ -302,8 +303,9 @@ window.__ModuleLoader__.load({
       'seed.briefWarnings': 'Brief warnings',
       'seed.noHistory': 'Do not read history automatically; if a read-back is truly needed, state the gap and use the Stage 2 approval path.',
       'seed.ask': 'After receiving a task, proactively ask the user when something is unclear, missing, or ambiguous; do not guess.',
+      'seed.cardId': 'When naming a card, use the label shown in the todo assistant first (e.g. #6.12); if an internal id is needed, write "#6.12 (td_45rb)", never the internal id alone; do not invent card numbers, and confirm when unsure whether a card exists.',
       'handling.briefHeader': 'This is the task brief for existing card #{id}「{title}」; do not create a duplicate card.',
-      'handling.briefNote': 'If anything is unclear or ambiguous, ask me first; use todo_read #{id} for more detail.',
+      'handling.briefNote': 'If anything is unclear or ambiguous, ask me first; use the displayed card label first and put any internal id in parentheses; use todo_read #{id} for more detail.',
       'source.doc': 'doc',
       'source.code': 'code',
       'seed.hint': '(Read todo_read #{id} for more detail; append new findings with todo_note instead of rewriting the card; in this round, read code and existing materials and present a plan first — do not modify any files; start implementation only after the developer confirms the plan. If you need the developer to decide, confirm a plan, or supply missing information during the work, use the DSH ask_user_question tool while the task is running and wait for the answer; do not decide on your own and do not defer the question to the final reply. When the work is done, ask the developer whether to mark #{id} done, then call todo_status.)',
@@ -339,7 +341,7 @@ Keep in mind
       'rules.save': '保存',
       'rules.saved': '已保存',
       'rules.empty': '这个工作区还没有规则',
-      'handling.insert': 'Switch to todo #{id}「{title}」now: read it with todo_read first, then continue from its next step; when anything is unclear or ambiguous, proactively ask me with the DSH ask_user_question tool and wait for my answer — do not guess, and do not defer questions to the end; ask me whether to mark it done when finished.',
+      'handling.insert': 'Switch to todo #{id}「{title}」now: read it with todo_read first, then continue from its next step; when naming a card, use the label shown in the todo assistant first, with any internal id in parentheses; when anything is unclear or ambiguous, proactively ask me with the DSH ask_user_question tool and wait for my answer — do not guess, and do not defer questions to the end; ask me whether to mark it done when finished.',
       'handling.boundTo': 'Handled by session {id}',
       'action.expand': 'Show details',
       'action.collapse': 'Hide details',
@@ -1403,6 +1405,7 @@ Keep in mind
           lines.push(`- ${t('seed.check')}`)
           lines.push(`- ${t('seed.noHistory')}`)
           lines.push(`- ${t('seed.ask')}`)
+          lines.push(`- ${t('seed.cardId')}`)
           lines.push(fill2(t('seed.hint'), { id: detail.id }))
           return lines.join('\n')
         }
