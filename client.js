@@ -102,7 +102,6 @@ window.__ModuleLoader__.load({
       'meta.files': '{n} 个文件',
       'meta.notes': '{n} 条补充',
       'untitled': '（未命名）',
-      'card.hit': '相关',
       'capture.action': '记录待办',
       'pick.title': '插入待办引用',
       'pick.empty': '没有匹配的待办',
@@ -258,7 +257,6 @@ window.__ModuleLoader__.load({
       'meta.files': '{n} files',
       'meta.notes': '{n} notes',
       'untitled': '(untitled)',
-      'card.hit': 'Related',
       'capture.action': 'Record todo',
       'pick.title': 'Insert a todo reference',
       'pick.empty': 'No matching todo',
@@ -453,8 +451,6 @@ Keep in mind
 .tdash-no { flex: 0 0 auto; color: var(--dsw-alias-label-secondary); font-size: 14px; line-height: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tdash-title { flex: 1 1 auto; min-width: 0; text-align: left; border: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; line-height: 20px; font-weight: 500; padding: 0; cursor: text; word-break: break-word; }
 .tdash-title:hover { color: var(--dsw-alias-brand-primary); }
-.tdash-card[data-hit="true"] { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 2px 0 0 var(--dsw-alias-brand-primary); }
-.tdash-hit { flex: 0 0 auto; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
 .tdash-chip { flex: 0 0 auto; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); }
 .tdash-next { color: var(--dsw-alias-label-secondary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .tdash-meta { display: flex; align-items: center; gap: 4px; min-height: 22px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
@@ -2324,7 +2320,7 @@ Keep in mind
 
           return h(
             'div',
-            { key: row.id, className: 'tdash-card', 'data-row-id': row.id, 'data-kind': row.kind, 'data-status': row.status, 'data-hit': row.hit === true ? 'true' : 'false' },
+            { key: row.id, className: 'tdash-card', 'data-row-id': row.id, 'data-kind': row.kind, 'data-status': row.status },
             h(
               'div',
               { className: 'tdash-row1' },
@@ -2358,7 +2354,6 @@ Keep in mind
               'div',
               { className: 'tdash-titlerow' },
               titleNode,
-              row.hit === true ? h('span', { className: 'tdash-hit' }, t('card.hit')) : null,
             ),
             row.nextStep === '' ? null : h('div', { className: 'tdash-next' }, row.nextStep),
             h(
