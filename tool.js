@@ -516,6 +516,13 @@ export function createTodoReadTool({ defineTool, store }) {
     return record
   }
 
+  const sourceTag = (source) => {
+    const tags = [source.kind]
+    if (source.purpose !== undefined) tags.push(source.purpose)
+    if (source.kind === 'file') tags.push(source.verified === true ? 'verified' : 'unverified')
+    return tags.join(', ')
+  }
+
   return defineTool({
     name: 'todo_read',
     description: [
@@ -581,7 +588,7 @@ export function createTodoReadTool({ defineTool, store }) {
           const sources = value.sources ?? []
           const lines = [`#${value.label ?? value.id}「${value.title}」 sources (${sources.length}):`]
           for (const source of sources) {
-            lines.push(`${source.sid}\t[${source.kind}] ${source.label}${source.where === undefined ? '' : ` — ${JSON.stringify(source.where)}`}`)
+            lines.push(`${source.sid}\t[${sourceTag(source)}] ${source.label}${source.where === undefined ? '' : ` — ${JSON.stringify(source.where)}`}`)
           }
           if (lines.length === 1) lines.push('(none)')
           return [{ type: 'text', text: lines.join('\n') }]
@@ -635,7 +642,7 @@ export function createTodoReadTool({ defineTool, store }) {
           lines.push(`parked: ${item.label} — ${item.why}${tags.length === 0 ? '' : ` [${tags.join('; ')}]`}`)
         }
         for (const source of value.sources ?? []) {
-          lines.push(`source ${source.sid}: [${source.kind}] ${source.label}${source.where === undefined ? '' : ` — ${JSON.stringify(source.where)}`}`)
+          lines.push(`source ${source.sid}: [${sourceTag(source)}] ${source.label}${source.where === undefined ? '' : ` — ${JSON.stringify(source.where)}`}`)
         }
         if ((value.touchedFiles ?? []).length > 0) lines.push(`files: ${value.touchedFiles.join(', ')}`)
         const code = value.code ?? {}
@@ -714,8 +721,9 @@ export function createTodoNoteTool({ defineTool, store, now = Date.now }) {
   return defineTool({
     name: 'todo_note',
     description: [
-      'Append one short note to an existing card: a new fact, a piece of evidence, or a status remark discovered later.',
+      'Append one short note to an existing card: a new fact, a piece of evidence, a status remark, or an explicit no-result.',
       'Use it when working on the card and you learn something the card does not say. Do NOT rewrite the card and do NOT repeat what it already has; the note list is read in order.',
+      "Use kind='no-result' only when you explicitly looked for something in a named source/range and did not find it; put the question and range in the text and link sourceIds. A no-result is a check record, never evidence that the thing is absent from the whole session.",
       'Appending is cheap and needs no confirmation when you are already working on that card.',
     ].join(' '),
     parameters: {
@@ -723,8 +731,8 @@ export function createTodoNoteTool({ defineTool, store, now = Date.now }) {
       text: { type: 'string', required: true, description: 'At most 300 characters. One fact, not a summary.' },
       kind: {
         type: 'string',
-        enum: ['supplement', 'evidence', 'status'],
-        description: 'supplement (default): new context; evidence: a concrete observation; status: a state change.',
+        enum: ['supplement', 'evidence', 'status', 'no-result'],
+        description: 'supplement (default): new context; evidence: a concrete observation; status: a state change; no-result: an explicit check found nothing in the named source/range.',
       },
       basis: { type: 'string', enum: BRIEF_BASES, description: 'Optional BriefBasis for this note.' },
       role: { type: 'string', description: 'Optional role, e.g. doc/code/decision.' },
@@ -866,11 +874,13 @@ export function createTodoRecallTool({ defineTool, store, recall }) {
       'HARD RULE: never call this on your own initiative. The returned text stays in context and is paid for on every later step, so ask the developer first and name the card you want to read back.',
       'Call it WITHOUT slice first: it returns a cheap manifest (seq, turn, role, first line, token estimate) of the selected source. Then, with the developer, pick one slice and call it again WITH that slice to get the text.',
       'The default source is the card origin; use sourceId to read another source pointer returned by todo_read.',
+      "Before a card exists, call with target: 'session:current' and no id to read from this session; it never writes a card.",
       'First check what is already visible; pass gap (what is missing) and reason (why it must be read now). mode="first-batch" reads the earliest effective human turns, not the most recent messages. Stop as soon as the gap is resolved.',
       'Prefer what the card and its notes already say; recall is the fallback for content lost to compaction.',
     ].join(' '),
     parameters: {
-      id: { type: 'string', required: true, description: 'Card label like 3.2 or #3.2, or the td_ id.' },
+      id: { type: 'string', description: 'Card label like 3.2 or #3.2, or the td_ id. Omit when target is session:current.' },
+      target: { type: 'string', description: "Optional 'session:current' for a pre-card read; it never writes a card." },
       sourceId: { type: 'string', description: "Optional source sid from todo_read (e.g. s0). Omit for the card's origin." },
       gap: { type: 'string', description: 'What information is missing and why the current visible context is insufficient.' },
       reason: { type: 'string', description: 'Why this read is needed now; used in the approval prompt.' },
@@ -920,6 +930,7 @@ export function createTodoRecallTool({ defineTool, store, recall }) {
           for (const entry of value.entries ?? []) {
             lines.push(`${entry.seq}\t[${entry.role}] turn ${entry.turn}\t~${entry.tokens}t${entry.visible === true ? '\t[visible]' : ''}\t${entry.preview}`)
           }
+          if (value.truncated === true) lines.push(`Showing the first ${value.entries.length} of ${value.total} messages; request a narrower source/range for the rest.`)
           if (value.stop === true) lines.push('All requested messages are already in the current model surface; stop and use the visible context.')
           else lines.push('Ask the developer which slice to read, then call again with slice=[from, to].')
           return [{ type: 'text', text: lines.join('\n') }]
@@ -933,70 +944,119 @@ export function createTodoRecallTool({ defineTool, store, recall }) {
       },
     },
     async execute(args, exec) {
-      const id = typeof args?.id === 'string' ? args.id : ''
-      const record = store.findRef(id)
-      if (record === undefined) throw new TodoInputError('todo/not-found', `no card #${id}`)
-      const full = projectFull(record)
-      const sources = full.sources
-      const requestedSourceId = typeof args?.sourceId === 'string' ? args.sourceId.trim() : ''
+      const requestedId = typeof args?.id === 'string' ? args.id.trim() : ''
+      const wantsCurrent = typeof args?.target === 'string' && args.target.trim() === 'session:current'
+      if (wantsCurrent && requestedId !== '') {
+        throw new TodoInputError('todo/ambiguous-target', "target 'session:current' cannot be combined with a card id")
+      }
+      if (!wantsCurrent && requestedId === '') {
+        throw new TodoInputError('todo/target-required', "pass a card id, or target: 'session:current'")
+      }
+
+      let id = requestedId
+      let label = ''
       let target
       let sourceId = 'origin'
-      if (requestedSourceId !== '') {
-        target = sources.find((source) => source.sid === requestedSourceId)
-        if (target === undefined) {
-          return {
-            shape: 'unavailable',
-            id,
-            label: labelOf(record).label,
-            available: false,
-            reason: `source ${requestedSourceId} is not on this card`,
-            sourceId: requestedSourceId,
-            sources,
+      let sources = []
+      if (wantsCurrent) {
+        const session = exec?.agent?.session
+        const currentSessionId = typeof session?.id === 'string'
+          ? session.id
+          : typeof exec?.agent?.id === 'string'
+            ? exec.agent.id
+            : ''
+        if (currentSessionId === '') {
+          return { shape: 'unavailable', id: 'session:current', label: 'current session', available: false, reason: 'the current session id is unavailable' }
+        }
+        let end = Number.isInteger(session?.seq) ? session.seq - 1 : 0
+        if (end < 1 && typeof session?.snapshotEvents === 'function') {
+          try {
+            end = session.snapshotEvents().reduce((max, event) => (Number.isInteger(event?.seq) && event.seq > max ? event.seq : max), 0)
+          } catch {
+            // Keep the unavailable answer below.
           }
         }
-        sourceId = target.sid
-      } else if (record.origin !== undefined) {
-        target = record.origin
+        if (end < 1) {
+          return { shape: 'unavailable', id: 'session:current', label: 'current session', available: false, reason: 'this session has no history yet' }
+        }
+        id = 'session:current'
+        label = 'current session'
+        target = { sid: 'session:current', kind: 'session', label, where: { sessionId: currentSessionId, seqRange: [1, end] } }
+        sourceId = 'session:current'
       } else {
-        target = sources.find((source) => source.kind === 'session' && typeof source.where?.sessionId === 'string')
-        if (target === undefined) {
-          return {
-            shape: 'unavailable',
-            id,
-            label: labelOf(record).label,
-            available: false,
-            reason: 'this card has no origin session or session source',
-            sources,
+        const record = store.findRef(id)
+        if (record === undefined) throw new TodoInputError('todo/not-found', `no card #${id}`)
+        const full = projectFull(record)
+        sources = full.sources
+        label = labelOf(record).label
+        const requestedSourceId = typeof args?.sourceId === 'string' ? args.sourceId.trim() : ''
+        if (requestedSourceId !== '') {
+          target = sources.find((source) => source.sid === requestedSourceId)
+          if (target === undefined) {
+            return {
+              shape: 'unavailable',
+              id,
+              label,
+              available: false,
+              reason: `source ${requestedSourceId} is not on this card`,
+              sourceId: requestedSourceId,
+              sources,
+            }
           }
+          sourceId = target.sid
+        } else if (record.origin !== undefined) {
+          target = record.origin
+        } else {
+          target = sources.find((source) => source.kind === 'session' && typeof source.where?.sessionId === 'string')
+          if (target === undefined) {
+            return {
+              shape: 'unavailable',
+              id,
+              label,
+              available: false,
+              reason: 'this card has no origin session or session source',
+              sources,
+            }
+          }
+          sourceId = target.sid
         }
-        sourceId = target.sid
       }
+
+      const currentSessionId = typeof exec?.agent?.session?.id === 'string'
+        ? exec.agent.session.id
+        : typeof exec?.agent?.id === 'string'
+          ? exec.agent.id
+          : ''
+      const targetSessionId = typeof target?.where?.sessionId === 'string'
+        ? target.where.sessionId
+        : typeof target?.sessionId === 'string'
+          ? target.sessionId
+          : ''
+      const surface = currentSessionId !== '' && targetSessionId === currentSessionId
       const mode = typeof args?.mode === 'string' ? args.mode.trim() : ''
+      const unavailable = (extra = {}) => {
+        const value = { shape: 'unavailable', id, label, available: false, sourceId, sources }
+        for (const [key, item] of Object.entries(extra)) {
+          if (item !== undefined) value[key] = item
+        }
+        return value
+      }
+
       if (mode === 'first-batch') {
-        const result = await recall.firstBatch(target, { currentTurn: currentTurn(exec?.agent?.session) })
-        if (result.available !== true) return { shape: 'unavailable', id, label: labelOf(record).label, available: false, reason: result.reason, sourceId, sources, range: result.range, sessionId: result.sessionId }
-        return { shape: 'first-batch', id, label: labelOf(record).label, available: true, sourceId, sources, ...result }
+        const result = await recall.firstBatch(target, { currentTurn: currentTurn(exec?.agent?.session), surface })
+        if (result.available !== true) return unavailable({ reason: result.reason, range: result.range, sessionId: result.sessionId })
+        return { shape: 'first-batch', id, label, available: true, sourceId, sources, ...result }
       }
       if (Array.isArray(args?.slice)) {
-        const result = await recall.body(target, args.slice)
-        if (result.available !== true) return { shape: 'unavailable', id, label: labelOf(record).label, available: false, reason: result.reason, sourceId, sources, stop: result.stop, stats: result.stats }
-        return { shape: 'body', id, label: labelOf(record).label, available: true, sourceId, sources, ...result }
+        const result = await recall.body(target, args.slice, { surface })
+        if (result.available !== true) return unavailable({ reason: result.reason, stop: result.stop, stats: result.stats })
+        return { shape: 'body', id, label, available: true, sourceId, sources, ...result }
       }
-      const result = await recall.manifest(target)
+      const result = await recall.manifest(target, { surface })
       if (result.available !== true) {
-        return {
-          shape: 'unavailable',
-          id,
-          label: labelOf(record).label,
-          available: false,
-          reason: result.reason,
-          sourceId,
-          sources,
-          range: result.range,
-          sessionId: result.sessionId,
-        }
+        return unavailable({ reason: result.reason, range: result.range, sessionId: result.sessionId })
       }
-      return { shape: 'manifest', id, label: labelOf(record).label, available: true, sourceId, sources, ...result }
+      return { shape: 'manifest', id, label, available: true, sourceId, sources, ...result }
     },
   })
 }

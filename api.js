@@ -64,7 +64,7 @@ function normalizeSource(input, at) {
   const turnRange = Array.isArray(input?.turnRange) && input.turnRange.length === 2 && input.turnRange.every(Number.isInteger)
     ? [input.turnRange[0], input.turnRange[1]]
     : undefined
-  const origin = ['stated', 'captured', 'derived'].includes(input?.origin) ? input.origin : 'stated'
+  const origin = ['stated', 'captured', 'derived', 'observed'].includes(input?.origin) ? input.origin : 'stated'
   return {
     sid,
     kind,

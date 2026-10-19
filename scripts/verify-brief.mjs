@@ -395,6 +395,24 @@ async function main() {
     checkEqual('inferred cause reads back as inferred', inferredRead.brief.confirmed[0].basis, 'inferred')
     check('inferred-only read keeps the credibility warning', inferredRead.briefWarnings.some((item) => item.includes('no confirmed')), JSON.stringify(inferredRead.briefWarnings))
 
+    const unbackedCreated = await tool.execute(
+      {
+        title: '无来源的已验证事实',
+        kind: 'idea',
+        nextStep: '先补来源',
+        touchedFiles: [],
+        mustRead: [],
+        brief: {
+          goal: '验证无来源事实的提示',
+          nextAction: '先补来源',
+          confirmed: [{ text: '生产环境使用 PostgreSQL', basis: 'verified' }],
+        },
+      },
+      exec,
+    )
+    const unbackedRead = await readTool.execute({ id: unbackedCreated.id }, exec)
+    check('unsourced verified fact gets a source warning', unbackedRead.briefWarnings.some((item) => item.includes('no sourceIds')), JSON.stringify(unbackedRead.briefWarnings))
+
     const legacyCreated = await tool.execute(
       {
         title: '没有简报的旧式卡',

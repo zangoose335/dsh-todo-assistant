@@ -99,7 +99,19 @@ export async function apply(ctx) {
     },
   })
 
-  ctx.on('session/event', (session, event) => detector.onSessionEvent(session, event))
+  ctx.on('session/event', (session, event) => {
+    detector.onSessionEvent(session, event)
+    if (event?.type !== 'tool/call') return
+    const toolName = typeof event.data?.name === 'string' ? event.data.name : ''
+    if (toolName === 'todo_status' || toolName === 'ask_user_question') return
+    const sessionId = typeof session?.id === 'string' ? session.id : ''
+    if (sessionId === '') return
+    const card = store.all().find((record) => record.status === 'open' && record.handling?.sessionId === sessionId)
+    if (card === undefined) return
+    void store.update(card.id, { status: 'doing' }, Date.now).catch((error) => {
+      ctx.logger?.warn?.(`todo-assistant: could not mark ${card.id} doing: ${String(error?.message ?? error)}`)
+    })
+  })
   // `#DB … #/db` must reach the step that ANSWERS the message, and the loop
   // appends `user/message` only after that step's prompt assembly — so scan the
   // inbox claim, which happens before assembly.

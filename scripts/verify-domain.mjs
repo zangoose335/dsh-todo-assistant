@@ -56,6 +56,26 @@ function checkOutput(tool, value, label) {
   check(`${label}: output stays inside its schema`, extra.length === 0 && missing.length === 0, `extra=${extra.join(',')} missing=${missing.join(',')}`)
 }
 
+/** Detect `undefined` values that make a tool result non-lossless JSON. */
+function checkLossless(label, value) {
+  const bad = []
+  const walk = (item, path) => {
+    if (item === undefined) {
+      bad.push(path)
+      return
+    }
+    if (Array.isArray(item)) {
+      item.forEach((child, index) => walk(child, `${path}[${index}]`))
+      return
+    }
+    if (item !== null && typeof item === 'object') {
+      for (const [key, child] of Object.entries(item)) walk(child, `${path}.${key}`)
+    }
+  }
+  walk(value, '$')
+  check(label, bad.length === 0, bad.join(', '))
+}
+
 /** Assert one expectation and report both outcomes. */
 function check(label, ok, detail) {
   checks += 1
@@ -347,7 +367,7 @@ async function main() {
     )
     sourceRow = projectL0(store.get(sourceCardId))
     checkEqual('L0 file source count', [sourceRow.sourceCount, sourceRow.sessionSourceCount, sourceRow.fileSourceCount], [2, 1, 1])
-    checkEqual('projectFull returns stored sources', projectFull(store.get(sourceCardId)).sources.map((source) => source.sid), ['s1', 's2'])
+    checkEqual('projectFull returns stored plus derived file sources', projectFull(store.get(sourceCardId)).sources.map((source) => source.sid), ['s1', 's2', 'f1'])
     check('source pointers carry no body text', projectFull(store.get(sourceCardId)).sources.every((source) => !Object.hasOwn(source, 'text')), JSON.stringify(projectFull(store.get(sourceCardId)).sources))
     for (let index = 0; index < SOURCE_LIMIT - 2; index += 1) {
       await store.addSource(
@@ -373,6 +393,23 @@ async function main() {
     checkEqual('legacy origin source points at the session', legacySourceFull.sources[0]?.where?.sessionId, 'sess-legacy')
     checkEqual('legacy synthesis is not written back', (store.get(legacySourceCard.id).sources ?? []).length, 0)
     await store.remove(legacySourceCard.id)
+
+    const fileSourceCard = await store.create(
+      { workspace: '/tmp/repo-a', title: 'file source card', kind: 'idea', symptom: 'need reference docs', touchedFiles: ['src/doc.md', 'src/code.ts'], sessionId: 'sess-file' },
+      () => 1_800_000_200_850,
+    )
+    await store.put({
+      ...store.get(fileSourceCard.id),
+      mustRead: [{ label: '设计文档', text: '读设计文档', where: { file: 'src/doc.md' }, observed: true }],
+      park: [{ id: 'p1', label: '代码', why: '查实现', where: { file: 'src/code.ts' }, observed: false }],
+    })
+    const fileSourceFull = projectFull(store.get(fileSourceCard.id))
+    const derivedFiles = fileSourceFull.sources.filter((source) => source.kind === 'file')
+    checkEqual('mentioned files become file sources', derivedFiles.map((source) => source.label), ['src/doc.md', 'src/code.ts'])
+    checkEqual('doc and code purposes are inferred', derivedFiles.map((source) => source.purpose), ['doc', 'code'])
+    checkEqual('observed files are verified, others are stated', derivedFiles.map((source) => [source.origin, source.verified]), [['observed', true], ['stated', false]])
+    checkEqual('file sources are projected, not written back', (store.get(fileSourceCard.id).sources ?? []).length, 0)
+    await store.remove(fileSourceCard.id)
 
     console.log('\nverbatim developer request')
     const requestSession = {
@@ -688,6 +725,10 @@ async function main() {
     checkEqual('note basis and role are kept', [sourcedNote.basis, sourcedNote.role], ['verified', 'decision'])
     checkEqual('stored note keeps its source ids', store.get(captured.id).notes[1].sourceIds, ['s1'])
     checkEqual('stored note keeps basis and role', [store.get(captured.id).notes[1].basis, store.get(captured.id).notes[1].role], ['verified', 'decision'])
+    const noResultNote = await noteTool.execute({ id: captured.id, text: '查过 3.1 会话第 10～12 轮，没有找到迁移脚本', kind: 'no-result', sourceIds: ['s1'] }, exec)
+    checkOutput(noteTool, noResultNote, 'todo_note no-result')
+    checkEqual('no-result kind is stored', [noResultNote.kind, store.get(captured.id).notes[2].kind], ['no-result', 'no-result'])
+    checkEqual('no-result keeps its source', store.get(captured.id).notes[2].sourceIds, ['s1'])
     try {
       await noteTool.execute({ id: captured.id, text: '字'.repeat(301) }, exec)
       check('note over 300 characters is rejected', false, 'no rejection')
@@ -801,13 +842,15 @@ async function main() {
         { type: 'user/message', seq: 7, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] } },
       ],
     }
+    const currentApproval = recallApprovalDecision({ name: 'todo_recall', arguments: { target: 'session:current', gap: 'missing history', reason: 'pre-card read' } })
+    check('pre-card approval names session:current', currentApproval.reason.includes('session:current') && currentApproval.reason.includes('missing history'), currentApproval.reason)
     const approval = recallApprovalDecision({ name: 'todo_recall', arguments: { id: '3.2', sourceId: 's1', slice: [2, 3], gap: 'missing decision', reason: 'needed now' } })
     checkEqual('recall asks for approval', approval.kind, 'ask')
     check('approval names card, source, slice, gap and reason', approval.reason.includes('3.2') && approval.reason.includes('s1') && approval.reason.includes('2..3') && approval.reason.includes('missing decision') && approval.reason.includes('needed now'), approval.reason)
     checkEqual('non-recall tools delegate', recallApprovalDecision({ name: 'todo_add' }), undefined)
     const recall = createRecall({
       readSession: async (sessionId) => {
-        if (sessionId !== 'sess-recall' && sessionId !== 'sess-earlier') throw new Error('unknown session')
+        if (sessionId !== 'sess-recall' && sessionId !== 'sess-earlier' && sessionId !== 'sess-tool') throw new Error('unknown session')
         return fakeLog
       },
       estimateTokens: () => 42,
@@ -817,6 +860,23 @@ async function main() {
     const manifestOrigin = { sessionId: 'sess-recall', turn: 1, seqRange: [1, 5], cwd: '/tmp/repo-a', at: 1 }
     const capturedOriginal = store.get(captured.id)
     await store.put({ ...capturedOriginal, origin: manifestOrigin })
+    const currentManifest = await recallTool.execute({ target: 'session:current', mode: 'manifest' }, exec)
+    checkEqual('pre-card current-session manifest works', [currentManifest.shape, currentManifest.id, currentManifest.sourceId, currentManifest.total], ['manifest', 'session:current', 'session:current', 4])
+    checkOutput(recallTool, currentManifest, 'todo_recall session:current')
+    const currentBatch = await recallTool.execute({ target: 'session:current', mode: 'first-batch' }, exec)
+    checkEqual('pre-card current-session first batch excludes current turn', currentBatch.turns, [1, 2])
+    try {
+      await recallTool.execute({ id: captured.id, target: 'session:current' }, exec)
+      check('session:current and a card id are rejected together', false, 'no rejection')
+    } catch (error) {
+      check('session:current and a card id are rejected together', error.code === 'todo/ambiguous-target', `${error.code}: ${error.message}`)
+    }
+    try {
+      await recallTool.execute({}, exec)
+      check('recall needs a card id or session:current', false, 'no rejection')
+    } catch (error) {
+      check('recall needs a card id or session:current', error.code === 'todo/target-required', `${error.code}: ${error.message}`)
+    }
     const manifest = await recallTool.execute({ id: captured.id })
     checkEqual('manifest shape', [manifest.shape, manifest.available, manifest.total], ['manifest', true, 3])
     checkOutput(recallTool, manifest, 'todo_recall manifest')
@@ -824,23 +884,27 @@ async function main() {
     checkEqual('manifest previews the first line', manifest.entries[0].preview, '帮我看看刷新 token 后 401 的问题')
     checkEqual('manifest carries token estimates', manifest.entries[0].tokens, 42)
     checkEqual('manifest sums tokens', manifest.tokens, 126)
-    checkEqual('manifest marks surface-visible entries', manifest.entries.map((entry) => entry.visible ?? false), [true, false, false])
-    checkEqual('manifest reports surface stats', [manifest.stats.surfaceKnown, manifest.stats.surfaceVisible], [true, 1])
+    checkEqual('cross-session manifest does not claim local visibility', manifest.entries.map((entry) => entry.visible ?? false), [false, false, false])
+    checkEqual('cross-session manifest has unknown surface', [manifest.stats.surfaceKnown, manifest.stats.surfaceVisible], [false, 0])
     checkEqual('manifest does not stop while a gap remains', manifest.stop, false)
     const visibleOnly = await recall.manifest({ sessionId: 'sess-recall', seqRange: [2, 2] })
     checkEqual('manifest stops when every entry is visible', visibleOnly.stop, true)
+    const notesBeforeRecall = store.get(captured.id).notes.length
+    const sourcesBeforeRecall = store.get(captured.id).sources.length
     const body = await recallTool.execute({ id: captured.id, slice: [2, 3] })
     checkEqual('body shape and slice', [body.shape, body.slice], ['body', [2, 3]])
     checkOutput(recallTool, body, 'todo_recall body')
-    checkEqual('body skips the already-visible message', body.entries.map((entry) => entry.seq), [3])
-    checkEqual('body reports the skipped duplicate', body.stats.duplicatesSkipped, 1)
-    check('body keeps multi-line text', body.entries[0].text.includes('\n'), body.entries[0].text)
-    const allVisibleBody = await recallTool.execute({ id: captured.id, slice: [2, 2] })
-    checkEqual('all-visible body stops without reading', [allVisibleBody.shape, allVisibleBody.stop], ['unavailable', true])
-    checkEqual('all-visible body reports the duplicate', allVisibleBody.stats.duplicatesSkipped, 1)
-    checkOutput(recallTool, allVisibleBody, 'todo_recall all-visible body')
+    checkEqual('cross-session body returns its own entries', body.entries.map((entry) => entry.seq), [2, 3])
+    checkEqual('cross-session body has no local duplicate skip', body.stats.duplicatesSkipped, 0)
+    check('body keeps multi-line text', body.entries[1].text.includes('\n'), body.entries[1].text)
+    const visibleOnlySlice = await recallTool.execute({ id: captured.id, slice: [2, 2] })
+    checkEqual('cross-session body is not stopped by source surface', [visibleOnlySlice.shape, visibleOnlySlice.available], ['body', true])
+    checkOutput(recallTool, visibleOnlySlice, 'todo_recall cross-session body')
+    checkEqual('an ordinary read adds no note', store.get(captured.id).notes.length, notesBeforeRecall)
+    checkEqual('an ordinary read adds no source', store.get(captured.id).sources.length, sourcesBeforeRecall)
     const emptySlice = await recallTool.execute({ id: captured.id, slice: [4, 4] })
     checkEqual('a slice with no messages is unavailable', emptySlice.shape, 'unavailable')
+    checkLossless('todo_recall unavailable is lossless JSON', emptySlice)
     const sourcedManifest = await recallTool.execute({ id: captured.id, sourceId: 's1' })
     checkEqual('a selected source is used for the manifest', [sourcedManifest.shape, sourcedManifest.sourceId, sourcedManifest.total], ['manifest', 's1', 4])
     checkOutput(recallTool, sourcedManifest, 'todo_recall source manifest')

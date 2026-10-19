@@ -11,10 +11,17 @@
 export function recallApprovalDecision(exec) {
   if (exec?.name !== 'todo_recall') return undefined
   const args = exec?.arguments ?? {}
-  const id = typeof args?.id === 'string' && args.id.trim() !== '' ? args.id.trim() : '(missing card)'
-  const source = typeof args?.sourceId === 'string' && args.sourceId.trim() !== ''
-    ? `source ${args.sourceId.trim()}`
-    : 'origin source'
+  const current = typeof args?.target === 'string' && args.target.trim() === 'session:current'
+  const id = typeof args?.id === 'string' && args.id.trim() !== ''
+    ? args.id.trim()
+    : current
+      ? 'session:current'
+      : '(missing card)'
+  const source = current
+    ? 'current session'
+    : typeof args?.sourceId === 'string' && args.sourceId.trim() !== ''
+      ? `source ${args.sourceId.trim()}`
+      : 'origin source'
   const slice = Array.isArray(args?.slice) && args.slice.length === 2
     ? `, slice ${args.slice[0]}..${args.slice[1]}`
     : ', manifest only'

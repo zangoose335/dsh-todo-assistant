@@ -406,7 +406,7 @@ todo_recall(id?, target?, mode?, gap?, reason?)
 - `gap`/`reason`：模型说明“还缺什么/为什么历史可能有帮助”；pre-execute 用它生成审批提示；缺失则 deny。
 - 输出：`shape: 'index'|'body'|'unavailable'`；审批拒绝由 pre-execute/runtime 呈现，不进入工具输出；`batch: {kind:'first'|'targeted', fromTurn, toTurn, effectiveTurns, hasMore, nextRange}`；`stats: {messages, events, estimatedTokens, batch, duplicatesSkipped}`。
 - 读取顺序：先 `index` 再 `body`；如果当前可见上下文已经足够，不调用任何 `todo_recall`。
-- 正文读取成功后：**有卡片/阶段目标时**追加/更新轻量 `SourceRef`（不存正文），按 `sessionId+seqRange` 去重；不改 `updatedAt`；已读过的范围再次请求时返回 `duplicatesSkipped`，不重复注入；**建卡前的 session 目标不写卡片**，由 `todo_add` 的 `where`（sessionId/seqRange）记录来源；`sourceIds` 只用于已有 sources 的后续 note/proposal。
+- 正文读取成功后：**不自动追加/更新 source**。按方案 A，只记录两类读取结果：读出了结论 → `todo_note`；明确查过但没找到 → `kind='no-result'` 的 note（文字写问题与范围，`sourceIds` 指向来源）。普通浏览、读完觉得没用的内容不记录；`duplicatesSkipped` 只表示当前 surface 已可见而跳过的数量，不是持久读取账本。建卡前的 session 目标不写卡片；`todo_add` 用 `where` 记录来源。
 - 错误处理：逐来源 `available/reason`；失效来源不影响其他来源；无 origin/手工卡 `unavailable`；审批拒绝由 runtime 呈现、工具不执行；不要伪造读取结果。
 - 大小上限：沿用单消息 2000 字、整次 12000 字；`index` 限制行数/预览长度；`body` 只读请求的最小连续区间。
 - 只支持连续区间读取时：先用 `index` 定位相关轮次/消息，再读最小范围；不要假设 DSH 有语义检索；不要一次性注入整个会话。
@@ -549,7 +549,7 @@ Token 约束（与 2.8/2.9 一致）：
 #### 2.8.2 历史读取阶段
 
 - 先缺口后读取；小批次渐进；最小连续区间；不整会话注入。
-- 每批后只提取新信息；不重复总结已有上下文；已读范围用 `sources` 去重，返回 `duplicatesSkipped`。
+- 每批后只提取新信息；不重复总结已有上下文；当前 surface 已可见的内容跳过并计入 `duplicatesSkipped`；普通读取不留持久记录（方案 A）。
 - 信息足够立即停止；不因“已经读了 N 轮”继续。
 - 只支持连续区间时先 `index` 定位再读最小范围；不假设 DSH 有语义检索。
 - 每次读取记录 `stats`（messages/events/estimatedTokens/batch/duplicatesSkipped），作为代理指标。
@@ -576,7 +576,7 @@ Token 约束（与 2.8/2.9 一致）：
 - 累计读取字符数或其他可用的输入规模指标；
 - 历史索引读取与正文读取分别消耗的资源（index vs body）；
 - 实际读取批次数；
-- 重复读取次数及被去重的范围（`duplicatesSkipped`）；
+- 当前 surface 已可见而跳过的数量（`duplicatesSkipped`）；方案 A 不维护“所有读过范围”的持久账本；
 - 当前可见上下文已经足够时，是否仍发生历史读取（期望 0）；
 - 创建卡片后，简报是否覆盖目标/原因/确认事实/约束/下一步/未确认，是否足以避免后续重复调查；
 - 后续恢复任务时，是否因简报不足而不得不重复研究（行为探针/人工验收）。
@@ -895,7 +895,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 > **不阻塞 Gate 1**：T1 已用 `brief.leads`/`sources` 保存当前上下文线索；A2 增加多来源、回读与来源追加，属于 Stage 2 的历史补全。
 
-> **状态（2026-10-19）**：source schema、store `addSource`/`findSource`、L0 来源计数、legacy `s0`/文件来源合成、`todo_read` 的 `sources`/`source:<sid>`、recall 多来源与 `firstBatch`/stats、mustRead/park/note 的 sourceIds 已落地；`verify-domain.mjs` 247/247。A3 的 `tools/pre-execute` ask guard、`gap`/`reason`/`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已接入；append-on-read 的持久化 `duplicatesSkipped`、真实审批探针仍待做。
+> **状态（2026-10-19）**：source schema、store `addSource`/`findSource`、L0 来源计数、legacy `s0`/文件来源合成、`todo_read` 的 `sources`/`source:<sid>`、recall 多来源与 `firstBatch`/stats、mustRead/park/note 的 sourceIds 已落地；`verify-domain.mjs` 261/261。A3 的 `tools/pre-execute` ask guard、`gap`/`reason`/`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已接入；方案 A 的普通读取不落盘；真实审批探针已完成允许/拒绝。
 
 - **目标与原因**：让一张卡片能引用创建卡片之前的任意历史轮次/片段，支持多个来源，并让 `todo_recall` 读取卡片实际引用的来源；来源只保存轻量指针，不保存正文，避免 Token 膨胀。
 - **当前问题**：`todo_add` 只写当前轮的 `origin.seqRange`（`tool.js:141-167`）；`recall.js:91-105` 只按该范围过滤；`mustRead/park` 的 `where` 只有一个指针（`domain.js:52-69`）；没有多来源模型；没有读取统计/去重；没有审批门禁。
@@ -906,25 +906,27 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
   4. **Recall core**：把 `recall.js` 的 `load` 拆成“读日志 + 建 turn 索引 + 按目标范围取消息”；新增 `firstBatch(origin, currentTurn)`（开头最早 5 个有效轮次，排除当前轮）、`turnIndex(origin, range)`、`sourceManifest(source)`、`body(source, slice)`；继续用 `readSession`，不重建历史读取架构；不能确定精确边界时返回 `boundary:'approximate'`。
   5. **Tools**：`todo_recall` 改为 `id?/target/mode/gap/reason`（兼容旧版 `slice` 作为 target 别名，见 2.3.7）；建卡前用 `session:current`，建卡后用卡片 id；不把 `approved` 当授权；`todo_note` 增加 optional `sourceIds`；`todo_read` 增加 `part:'sources'`/`part:'source:<sid>'`（可选）并把 `sources` 放进卡片输出。
   6. **描述**：`todo_recall` 描述明确“当前可见优先；先 index 再 body；只有确认缺口才读；正文/扩大范围走 DSH 审批；信息足够立即停止；不重复摘要已有内容”。
-  7. **Append-on-read**：只有正文读取成功后追加/更新 session source；失败/空范围/仅 index 不追加；同范围再次读取返回 `duplicatesSkipped`，不重复注入。
+  7. **选择性记录（方案 A）**：正文读取成功后不自动追加 source；读出了结论用 `todo_note` 记录，明确查过但没找到用 `kind='no-result'` 记录（带问题、范围、sourceIds）；普通浏览不记录。`duplicatesSkipped` 只统计当前 surface 已可见而跳过的条目。
   8. **Token 统计**：输出 `stats:{messages, events, estimatedTokens, batch, duplicatesSkipped}`；不存正文、不重复处理相同来源；不把整段历史复制进卡片。
 - **主要文件/模块**：`domain.js`、`api.js`、`recall.js`、`tool.js`、`host.js`、`scripts/verify-domain.mjs`。
 - **前置依赖**：P0-A1、P0-E1、P0-BASE。注：A2 只取 P0-E1 的“稳定编号/ID 约定”部分；P0-E1 中拖拽相关调查仍属 Stage 4，不阻塞 A2。
 - **验收标准**：
   - 一张卡可有 ≥2 个 session source；`todo_recall` 能按 `source` 读各自 index/body。
   - 旧卡无 `sources` 时，origin 仍可回读，显示为隐式 `s0`。
-  - 同一 session+range 重复读取不产生重复 source；`updatedAt` 不变；返回 `duplicatesSkipped`。
+  - 普通读取不新增 source/note；结论与明确空结果按方案 A 显式记录；当前 surface 已可见条目跳过并计入 `duplicatesSkipped`。
   - 建卡前 `session:current` 读取不写卡片（卡片尚不存在）；`todo_add` 用 `where`（sessionId/seqRange）记录来源，`sourceIds` 留给已有 sources 的后续 note/proposal。
   - 失效来源返回明确 `available:false/reason`，其他来源仍可用。
   - `sources` 不包含任何正文；`todo_add`/`todo_read`/`todo_note` 的输出 schema 通过 `checkOutput`。
-- **测试要求**：在 `scripts/verify-domain.mjs` 增加：多来源、legacy 合成、重复去重、无效 session、空范围、source 上限、输出 schema、`stats`、`duplicatesSkipped`、不存正文、建卡前 `session:current` 不写卡片。
+- **测试要求**：在 `scripts/verify-domain.mjs` 增加：多来源、legacy 合成、重复 source 去重、无效 session、空范围、source 上限、输出 schema、`stats`、surface 级 `duplicatesSkipped`、不存正文、`no-result` note、普通读取不写卡片、建卡前 `session:current` 不写卡片。
 - **风险与兼容性**：source 数组增长/记录变大；`table.update` 并发；旧卡合成不能写回；`sources` 字段不能被旧版本插件写回时丢失（降级风险，文档说明）；不要为了 `sources` 完整而读取更多历史。
 
 #### A3 当前可见优先、对话开头有效 5 轮、停止条件与 DSH 审批（Stage 2）
 
 > **不阻塞 Gate 1**：T2 已要求建卡默认只用当前可见上下文、不自动调用 `todo_recall`；A3 增加真正需要回读时的窗口/授权/停止条件。
 
-> **状态（2026-10-19）**：`approval.js` + `host.js` 的 `tools/pre-execute` ask guard 已接入，每次 `todo_recall`（含 manifest）都会请求审批；`gap`/`reason` 进入审批文案，`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已实现；append-on-read 的持久化 `duplicatesSkipped` 与真实 web 审批探针仍待做。
+> **状态（2026-10-19）**：`approval.js` + `host.js` 的 `tools/pre-execute` ask guard 已接入，每次 `todo_recall`（含 manifest）都会请求审批；`gap`/`reason` 进入审批文案，`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已实现。真实 web 审批已实测：允许与拒绝路径通过；UI 没有取消按钮；压缩会话的可见性提示曾在跨会话时误报，已改为只对当前会话使用 surface，待重测。方案 A 已确认：普通读取不持久记录，只保留结论与显式空结果。
+
+> **读取记录规则（方案 A，2026-10-19 已确认）**：只记录“读出了结论”和“明确查过但没找到”两类；普通浏览、读完觉得没用的内容不记录。空结果用 note `kind=no-result` 保存，文字写清问题与范围，`sourceIds` 指向来源；它是核对记录，不是事实，也不能证明整个会话都没有。
 
 - **目标与原因**：把 2.3.1-2.3.8 落实为流程和接口：先用当前可见上下文，确认信息缺口后才检索；第一批是对话开头最早 5 个有效轮次，不是必选项，也不是成功指标；正文/扩大范围走 DSH 工具审批；信息足够立即停止；Token 效率优先。
 - **当前问题**：没有 gap-first 流程；没有有效轮次定义；没有开头首批；没有停止条件；没有 DSH 审批；`todo_recall` 只按 origin 范围；标记可能被误解为历史读取授权；没有 Token 代理指标。
@@ -985,7 +987,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 > **不阻塞 Gate 1**：T1 的 `brief.leads` 已能在当前上下文保存文件/文档路径与用途；A5 增加“是否真的读过/是否仍成立”的 observed 校验和交接核对，属于 Stage 2 的验证增强。
 
-> **状态（2026-10-19）**：host 已从当前轮 `read`/`write`/`edit` 等 tool/call 收集 observed 路径，并在 `mustRead`/`park` 的文件引用上写入 `observed:true/false`，`todo_read` 显示 observed/unverified；A5 的文件 SourceRef 合并、seed 核对指引与 fs 存在性检查仍待做。
+> **状态（2026-10-19）**：host 已从当前轮 `read`/`write`/`edit` 等 tool/call 收集 observed 路径，并在 `mustRead`/`park` 的文件引用上写入 `observed:true/false`；mentions 的文件会投影为 file source（doc/code purpose、observed/stated、verified），`todo_read` 显示这些标记；新会话种子列出参考文件并提醒先核对。自动文件存在性检查未做，按 A5 允许的降级交给后续会话核对。
 
 - **目标与原因**：在 T1 的 `brief.leads`（当前上下文路径/用途）之上，增加“实际读过/确认过”“历史中提及”“未核实”的校验；后续会话先核对文档再改代码；**路径优先于提前总结，避免为了完整而读所有文档**。
 - **当前问题**：T1 的 `leads` 能保存当前上下文路径，但 host 不校验是否真的读过；旧 `mustRead.where.file` 没有 provenance；`buildSeed` 没有核对指令（`client.js:1228-1269`）。
@@ -1010,6 +1012,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 #### A6 A 阶段集成测试、Token 代理指标与行为探针（Stage 2）
 
 > **Gate 1 由 T5 判定**；A6 验收历史补全、授权、累计成本和冲突处理，不反向阻塞基础建卡。
+
+> **状态（2026-10-19）**：`scripts/verify-recall.mjs` 已加入 8 轮 fake log 的 35 项检查；`verify-domain.mjs` 261/261、`verify-brief.mjs` 118/118。真实审批允许/拒绝已实测，取消按钮不存在；同会话隐藏范围（seq 9..1554，536 条）实测无 visible、stop=false，确认压缩隐藏内容不会被误报为可见；manifest 已限制为 120 条，避免一次输出 536 条 / ~48 万估算 token。20 个场景的自动化/行为探针对照见 `docs/STAGE2-TEST-MATRIX.md`；建卡前 `session:current` 已实现、自动测试并通过真实审批（first-batch，当前轮排除，目录 120 条上限）；A4 冲突行为探针和模型行为探针仍未完成。
 
 - **目标与原因**：把 A2-A5 的验收固化为可重复测试，覆盖当前可见优先、按需检索、有效轮次、DSH 审批、停止条件和 Token 效率；同时锁定“不会把无关主任务上下文全部复制进卡片”。
 - **当前问题**：现有 `scripts/verify-domain.mjs` 的 recall 测试只覆盖 origin 范围；DESIGN 的 181/181 已过时；没有开头首批/有效轮次/DSH 审批/Token 代理指标测试。
@@ -1476,13 +1480,15 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 **完成条件**：
 - P0-A1：历史/有效轮次/授权/成本调查结论；审批/索引边界已验证。
-- A2：多来源 sources、按需回读、旧卡兼容、append-on-read、失效来源反馈。
+- A2：多来源 sources、按需回读、旧卡兼容、失效来源反馈；读取记录按方案 A（不记普通读取，只记结论/空结果）。
 - A3：当前可见优先、gap-first、开头有效 5 轮、停止条件、DSH `allowed-once` 审批、标记不授权历史。
 - A4：sourceIds/where 链接、历史冲突、`superseded`；不重复 T2 的 basis 基础。
 - A5：observed 文件校验、文档核对指引；不阻塞 T1 的 leads。
 - A6：历史功能 10 项 + Token 10 场景 + **累计成本指标**（消息/事件/字符/索引 vs 正文/批次/重复读取/当前足够时是否读取/简报是否足够避免复研）。
 - 现有 184 项 + Gate 1 测试不回归。
 - 本 Gate 是辅助能力，不反向要求 Stage 1 变更；可延后。
+
+> **Gate 2 状态（2026-10-19）：通过（PASS，带已记录限制）。** 详情见 `docs/GATE2-REVIEW.md`；探针结果见 `docs/A6-A4-PROBES.md`。T1–T5 行为/审批实测，T6 由 C2/C2b 覆盖，T7/T10 使用自动代理，T8/T9 自动+实测；A4 C2b/C3/C4 通过，C1 夹具无效但明确替代由 C2b 覆盖；建卡前 `session:current` 已实现并通过真实审批；append-on-read 已被方案 A 取代；T7/T10 无独立模型会话、无精确 TokenUsage、审批取消/不可用依赖 DSH 契约。
 
 ### Gate 3：任务交接质量（Stage 3，后续）
 

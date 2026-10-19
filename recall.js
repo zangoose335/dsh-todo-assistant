@@ -20,6 +20,8 @@ const MESSAGE_EVENTS = new Set(['user/message', 'assistant/message', 'tool/resul
 
 /** One manifest preview keeps at most this many code points of the first line. */
 const PREVIEW_LIMIT = 40
+/** A manifest is an index, not a transcript: bound its rows too. */
+const MANIFEST_ENTRY_LIMIT = 120
 /** Body reads truncate one message to this many characters. */
 const BODY_MESSAGE_LIMIT = 2000
 /** …and the whole body to this many characters. */
@@ -150,8 +152,8 @@ export function createRecall({ readSession, readSurface, estimateTokens }) {
   }
 
   /** The seqs currently in the model surface, when the DSH service exposes it. */
-  async function visibleSeqs(sessionId) {
-    if (typeof readSurface !== 'function') return undefined
+  async function visibleSeqs(sessionId, enabled = true) {
+    if (enabled === false || typeof readSurface !== 'function') return undefined
     try {
       const snapshot = await readSurface(sessionId)
       const events = Array.isArray(snapshot?.events) ? snapshot.events : []
@@ -211,7 +213,7 @@ export function createRecall({ readSession, readSurface, estimateTokens }) {
      * @param value - origin or source pointer.
      * @returns the manifest, or an unavailable answer.
      */
-    async manifest(value) {
+    async manifest(value, options = {}) {
       let loaded
       try {
         loaded = await load(value)
@@ -222,16 +224,19 @@ export function createRecall({ readSession, readSurface, estimateTokens }) {
       if (loaded.rows.length === 0) {
         return { available: false, reason: 'the source range holds no messages', range: loaded.range, sessionId: loaded.sessionId }
       }
-      const visible = await visibleSeqs(loaded.sessionId)
-      const { entries, tokens } = entriesOf(loaded.rows, visible)
+      const visible = await visibleSeqs(loaded.sessionId, options.surface !== false)
+      const all = entriesOf(loaded.rows, visible)
+      const entries = all.entries.slice(0, MANIFEST_ENTRY_LIMIT)
+      const tokens = entries.reduce((sum, entry) => sum + entry.tokens, 0)
       return {
         available: true,
         sessionId: loaded.sessionId,
         range: loaded.range,
-        total: entries.length,
+        total: all.entries.length,
         tokens,
         entries,
-        stop: visible !== undefined && entries.length > 0 && entries.every((entry) => entry.visible === true),
+        truncated: all.entries.length > entries.length,
+        stop: visible !== undefined && all.entries.length > 0 && all.entries.every((entry) => entry.visible === true),
         stats: statsOf(loaded, entries, tokens, 0, visible),
       }
     },
@@ -243,7 +248,7 @@ export function createRecall({ readSession, readSurface, estimateTokens }) {
      * @param slice - inclusive `[from, to]`.
      * @returns the body, clipped to a bounded size.
      */
-    async body(value, slice) {
+    async body(value, slice, options = {}) {
       const from = Number.isInteger(slice?.[0]) ? slice[0] : undefined
       const to = Number.isInteger(slice?.[1]) ? slice[1] : undefined
       if (from === undefined || to === undefined || from > to) {
@@ -260,7 +265,7 @@ export function createRecall({ readSession, readSurface, estimateTokens }) {
       if (wanted.length === 0) {
         return { available: false, reason: `no messages between seq ${from} and ${to}`, range: loaded.range }
       }
-      const visible = await visibleSeqs(loaded.sessionId)
+      const visible = await visibleSeqs(loaded.sessionId, options.surface !== false)
       const skipped = visible === undefined ? [] : wanted.filter((row) => visible.has(row.seq))
       const toRead = visible === undefined ? wanted : wanted.filter((row) => !visible.has(row.seq))
       if (toRead.length === 0) {
@@ -330,17 +335,20 @@ export function createRecall({ readSession, readSurface, estimateTokens }) {
         return { available: false, reason: 'the source has no effective human turns', range: loaded.range, sessionId: loaded.sessionId }
       }
       const rows = loaded.rows.filter((row) => turns.includes(row.turn))
-      const visible = await visibleSeqs(loaded.sessionId)
-      const { entries, tokens } = entriesOf(rows, visible)
+      const visible = await visibleSeqs(loaded.sessionId, options.surface !== false)
+      const all = entriesOf(rows, visible)
+      const entries = all.entries.slice(0, MANIFEST_ENTRY_LIMIT)
+      const tokens = entries.reduce((sum, entry) => sum + entry.tokens, 0)
       return {
         available: true,
         sessionId: loaded.sessionId,
         range: loaded.range,
         turns,
-        total: entries.length,
+        total: all.entries.length,
         tokens,
         entries,
-        stop: visible !== undefined && entries.length > 0 && entries.every((entry) => entry.visible === true),
+        truncated: all.entries.length > entries.length,
+        stop: visible !== undefined && all.entries.length > 0 && all.entries.every((entry) => entry.visible === true),
         stats: statsOf(loaded, entries, tokens, 1, visible),
       }
     },

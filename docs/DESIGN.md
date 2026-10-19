@@ -270,7 +270,7 @@ interface Note {
   at: number
   fromSession: string
   turn: number
-  kind: 'supplement' | 'evidence' | 'status'
+  kind: 'supplement' | 'evidence' | 'status' | 'no-result'
   text: string                // ≤300 字
 }
 ```
@@ -691,7 +691,7 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 >
 > **Stage 1 / T1-T5 已完成；Gate 1 已按 `docs/PLAN.md` §6 正式条件通过（已提交并推送 f7e3a98）**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
 > `brief.nextAction` 与 `nextStep` 的统一契约、brief 参与的重复检测、version-1 兼容和旧 schema 降级模拟均已实现。
-> 当前 `scripts/verify-domain.mjs` 通过 193/193，`scripts/verify-brief.mjs` 通过 117/117，`git diff --check` 通过。
+> 当前 `scripts/verify-domain.mjs` 通过 261/261，`scripts/verify-brief.mjs` 通过 118/118，`git diff --check` 通过；Stage 2 的 `scripts/verify-recall.mjs` 通过 35/35，行为探针矩阵见 `docs/STAGE2-TEST-MATRIX.md`。
 > 十个场景中，场景 1–9 有真实模型/确定性证据，场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝；场景 7 已在最新 3641 字符工具描述下完成两次独立测试（#6.1/#6.2）。除场景 7 外，场景 1–9 的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
 > **Gate 1 UI 冒烟已由开发者验证（2026-10-19）**：`#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。
 > **发布前仍未验证**：真实旧版本读写兼容、备份/恢复/迁移演练、场景 C 澄清探针；这些不阻塞 §6 代码 Gate，但在补齐前不得把发布检查描述为已完成。

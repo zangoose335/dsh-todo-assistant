@@ -34,7 +34,7 @@ export const STATUSES = ['open', 'doing', 'done', 'dropped']
 export const KINDS = ['defect', 'idea']
 
 /** Note kinds accepted by the append-only note list. */
-export const NOTE_KINDS = ['supplement', 'evidence', 'status']
+export const NOTE_KINDS = ['supplement', 'evidence', 'status', 'no-result']
 
 /** A card may reference at most this many history/file sources. */
 export const SOURCE_LIMIT = 32
@@ -67,7 +67,7 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     purpose: z.string().optional(),
     where: where.optional(),
     turnRange: seqRange.optional(),
-    origin: z.enum(['stated', 'captured', 'derived']).default('stated'),
+    origin: z.enum(['stated', 'captured', 'derived', 'observed']).default('stated'),
     verified: z.boolean().default(false),
     at: z.number().int(),
   })
@@ -685,11 +685,42 @@ export function applyPatch(record, patch, at) {
  * @param record - stored record.
  * @returns source pointers without any body.
  */
+/** Whether a mentioned file reads as documentation rather than code. */
+function filePurpose(file) {
+  return /\.(md|mdx|txt|rst|adoc)$/iu.test(file) || /(^|\/)docs?\//iu.test(file) ? 'doc' : 'code'
+}
+
+/** Allocate a file-source id that does not collide with stored source ids. */
+function fileSid(sources) {
+  let index = 1
+  while (sources.some((source) => source.sid === `f${index}`)) index += 1
+  return `f${index}`
+}
+
 function sourcesForRecord(record) {
   const stored = Array.isArray(record.sources) ? record.sources : []
-  if (stored.length > 0) return stored
-  const sources = []
-  if (record.origin !== undefined && record.origin !== null) {
+  const sources = [...stored]
+  const fileSeen = new Set(
+    sources
+      .filter((source) => source.kind === 'file')
+      .map((source) => source.where?.file)
+      .filter((file) => typeof file === 'string'),
+  )
+  const observed = new Map()
+  const files = []
+  for (const item of record.mustRead ?? []) {
+    if (typeof item?.where?.file !== 'string') continue
+    files.push(item.where.file)
+    observed.set(item.where.file, item.observed === true)
+  }
+  for (const item of record.park ?? []) {
+    if (typeof item?.where?.file !== 'string') continue
+    files.push(item.where.file)
+    observed.set(item.where.file, item.observed === true)
+  }
+  for (const file of record.touchedFiles ?? []) if (typeof file === 'string') files.push(file)
+
+  if (sources.length === 0 && record.origin !== undefined && record.origin !== null) {
     sources.push({
       sid: 's0',
       kind: 'session',
@@ -701,21 +732,19 @@ function sourcesForRecord(record) {
       at: record.origin.at,
     })
   }
-  const files = []
-  for (const item of record.mustRead ?? []) if (typeof item?.where?.file === 'string') files.push(item.where.file)
-  for (const item of record.park ?? []) if (typeof item?.where?.file === 'string') files.push(item.where.file)
-  for (const file of record.touchedFiles ?? []) if (typeof file === 'string') files.push(file)
-  const seen = new Set()
+
   for (const file of files) {
-    if (file === '' || seen.has(file)) continue
-    seen.add(file)
+    if (file === '' || fileSeen.has(file) || sources.length >= SOURCE_LIMIT) continue
+    fileSeen.add(file)
+    const isObserved = observed.get(file) === true
     sources.push({
-      sid: `s${sources.length}`,
+      sid: fileSid(sources),
       kind: 'file',
       label: file,
+      purpose: filePurpose(file),
       where: { file },
-      origin: 'stated',
-      verified: false,
+      origin: isObserved ? 'observed' : 'stated',
+      verified: isObserved,
       at: record.updatedAt,
     })
   }
@@ -779,6 +808,17 @@ export function projectFull(record) {
   if (briefView.source === 'stored' && briefView.brief?.nextAction !== core.nextStep) {
     briefWarnings = [...briefWarnings, 'core.nextStep differed from brief.nextAction; the brief value is canonical']
     core = { ...core, nextStep: briefView.brief.nextAction }
+  }
+  if (briefView.source === 'stored') {
+    const unbacked = (briefView.brief?.confirmed ?? []).filter(
+      (item) => (item.basis === 'verified' || item.basis === 'decided') && (item.sourceIds ?? []).length === 0,
+    )
+    if (unbacked.length > 0) {
+      briefWarnings = [
+        ...briefWarnings,
+        `${unbacked.length} confirmed/decided item(s) have no sourceIds; attach an existing source or mark them inferred/unknown`,
+      ]
+    }
   }
   return {
     id: record.id,
