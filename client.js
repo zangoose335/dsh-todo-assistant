@@ -487,8 +487,7 @@ Keep in mind
 .tdash-sort-opt[data-on="true"] { background: var(--dsw-alias-bg-layer-2); }
 .tdash-card[draggable="true"] { cursor: grab; }
 .tdash-card[data-dragging="true"] { opacity: .35; cursor: grabbing; outline: 2px dashed var(--dsw-alias-brand-primary); outline-offset: 2px; }
-.tdash-card[data-drop-position="before"] { box-shadow: 0 -2px 0 var(--dsw-alias-brand-primary); }
-.tdash-card[data-drop-position="after"] { box-shadow: 0 2px 0 var(--dsw-alias-brand-primary); }
+.tdash-drop-line { position: relative; z-index: 5; flex: 0 0 auto; height: 2px; margin: -7px 0; border-radius: 2px; background: var(--dsw-alias-brand-primary); pointer-events: none; }
 .tdash-rules-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-info { flex: 0 0 auto; box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
 .tdash-info:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -1321,19 +1320,19 @@ Keep in mind
         const [sortOpen, setSortOpen] = React.useState(false)
         const [manualOrder, setManualOrder] = React.useState([])
         const [draggingId, setDraggingId] = React.useState(null)
-        const [dropTarget, setDropTarget] = React.useState(null)
+        const [dropIndex, setDropIndex] = React.useState(null)
         const orderBeforeRef = React.useRef(null)
         const dragIdRef = React.useRef(null)
-        const dropTargetRef = React.useRef(null)
+        const dropIndexRef = React.useRef(null)
 
         React.useEffect(() => {
           const saved = readOrderState(scope, view)
           setSortMode(saved.mode)
           setManualOrder(saved.order)
           setDraggingId(null)
-          setDropTarget(null)
+          setDropIndex(null)
           setSortOpen(false)
-          dropTargetRef.current = null
+          dropIndexRef.current = null
           dragIdRef.current = null
         }, [scope, view])
 
@@ -2091,9 +2090,9 @@ Keep in mind
             return
           }
           dragIdRef.current = row.id
-          dropTargetRef.current = null
+          dropIndexRef.current = null
           setDraggingId(row.id)
-          setDropTarget(null)
+          setDropIndex(null)
           setSortOpen(false)
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) {
             event.dataTransfer.effectAllowed = 'move'
@@ -2130,43 +2129,45 @@ Keep in mind
           }
         }
 
-        function dragOverRow(rowId, event) {
-          if (dragIdRef.current === null || dragIdRef.current === rowId) return
+        function dragOverBody(event) {
+          if (dragIdRef.current === null) return
           event.preventDefault()
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) event.dataTransfer.dropEffect = 'move'
-          const rect = event.currentTarget.getBoundingClientRect()
-          const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
-          const current = dropTargetRef.current
-          if (current !== null && current.id === rowId && current.position === position) return
-          const next = { id: rowId, position }
-          dropTargetRef.current = next
-          setDropTarget(next)
+          const cards = [...document.querySelectorAll('.tdash-card')]
+          let index = cards.length
+          for (let position = 0; position < cards.length; position += 1) {
+            const rect = cards[position].getBoundingClientRect()
+            if (event.clientY < rect.top + rect.height / 2) {
+              index = position
+              break
+            }
+          }
+          if (dropIndexRef.current === index) return
+          dropIndexRef.current = index
+          setDropIndex(index)
         }
 
-        function dropOnRow(rowId, event) {
+        function dropOnBody(event) {
           event.preventDefault()
-          const target = dropTargetRef.current
+          const index = dropIndexRef.current
           const dragged = dragIdRef.current
           finishDrag()
-          if (target === null || dragged === null || target.id !== rowId) return
-          if (dragged === rowId) return
+          if (index === null || dragged === null) return
           const from = shownSorted.findIndex((row) => row.id === dragged)
-          const to = shownSorted.findIndex((row) => row.id === rowId)
-          if (from < 0 || to < 0) return
+          if (from < 0) return
           const ids = shownSorted.map((row) => row.id)
           const [moved] = ids.splice(from, 1)
-          const targetIndex = ids.indexOf(rowId)
-          if (targetIndex < 0) return
-          ids.splice(target.position === 'after' ? targetIndex + 1 : targetIndex, 0, moved)
-          if (ids.every((id, index) => id === shownSorted[index]?.id)) return
+          const insert = from < index ? index - 1 : index
+          ids.splice(insert, 0, moved)
+          if (ids.every((id, position) => id === shownSorted[position]?.id)) return
           applyManualOrder(ids)
         }
 
         function finishDrag() {
           dragIdRef.current = null
-          dropTargetRef.current = null
+          dropIndexRef.current = null
           setDraggingId(null)
-          setDropTarget(null)
+          setDropIndex(null)
         }
 
         const scopeOptions = [
@@ -2611,11 +2612,8 @@ Keep in mind
               'data-kind': row.kind,
               'data-status': row.status,
               'data-dragging': draggingId === row.id ? 'true' : 'false',
-              'data-drop-position': dropTarget !== null && dropTarget.id === row.id ? dropTarget.position : undefined,
               draggable: true,
               onDragStart: (event) => beginDrag(row, event),
-              onDragOver: (event) => dragOverRow(row.id, event),
-              onDrop: (event) => dropOnRow(row.id, event),
               onDragEnd: finishDrag,
             },
             h(
@@ -2703,7 +2701,14 @@ Keep in mind
             h('div', null, t('empty.hint')),
           )
         } else {
-          body = shownSorted.map(card)
+          const cards = shownSorted.map(card)
+          body = []
+          for (let index = 0; index <= cards.length; index += 1) {
+            if (draggingId !== null && dropIndex === index) {
+              body.push(h('div', { key: `drop-${index}`, className: 'tdash-drop-line', 'aria-hidden': 'true' }))
+            }
+            if (index < cards.length) body.push(cards[index])
+          }
         }
 
         return h(
@@ -2715,13 +2720,8 @@ Keep in mind
             'div',
             {
               className: 'tdash-body',
-              onDragOver: (event) => {
-                if (dragIdRef.current !== null) event.preventDefault()
-              },
-              onDrop: (event) => {
-                event.preventDefault()
-                finishDrag()
-              },
+              onDragOver: dragOverBody,
+              onDrop: dropOnBody,
             },
             errorText !== '' && phase !== 'error' ? h('div', { className: 'tdash-err' }, errorText) : null,
             helpOpen
