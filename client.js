@@ -128,7 +128,8 @@ window.__ModuleLoader__.load({
       'action.handle': '开始任务',
       'action.doing': '正在处理',
       'action.newSession': '新会话中立即执行',
-      'action.insertHere': '插入当前会话',
+      'action.insertHere': '插入一句提示',
+      'action.insertBrief': '插入任务简报',
       'error.noWorkspace': '这张卡没有可用的工作区，先切换到一个工作区',
       'error.noComposer': '当前会话的输入框不可用，已复制开场内容，可手动粘贴',
       'error.createSession': '新开会话失败',
@@ -147,6 +148,9 @@ window.__ModuleLoader__.load({
       'seed.briefTruncated': '简报超过 2000 字，已优先保留目标/约束/下一步；其余用 todo_read 补。',
       'seed.briefWarnings': '简报提示',
       'seed.noHistory': '不要自动读取历史；如确需回读，先说明缺口并按 Stage 2 审批。',
+      'seed.ask': '接到任务后，遇到不明白、信息不足或暧昧不清的地方，主动向用户提问，不要自行猜测。',
+      'handling.briefHeader': '这是已有卡片 #{id}「{title}」的任务简报，不要重复建卡。',
+      'handling.briefNote': '如果其中有不明白或暧昧不清的地方，先向我提问；需要更多细节用 todo_read #{id}。',
       'source.doc': '文档',
       'source.code': '代码',
       'seed.hint': '（需要更多细节用 todo_read #{id}；有新发现用 todo_note 追加，不要重写卡片；本轮先只读代码和现有资料并给出方案，不要修改任何文件；方案经开发者确认后再开始实现。处理过程中如果需要开发者做决定、确认方案或补充信息，使用 DSH 的 ask_user_question 工具在过程中提问并等待回答，不要自行决定，也不要把问题留到完成后的回复。完成后主动问开发者是否把 #{id} 标记为完成，确认后再调 todo_status。）',
@@ -183,7 +187,7 @@ window.__ModuleLoader__.load({
       'rules.save': '保存',
       'rules.saved': '已保存',
       'rules.empty': '这个工作区还没有规则',
-      'handling.insert': '现在切到待办 #{id}「{title}」：先用 todo_read 读它，再按里面的「下一步」继续；需要我决定、确认方案或补充信息时，用 DSH 的 ask_user_question 在处理过程中问我并等待回答，不要先自行决定，也不要把问题留到最后；改完后问我是否标记完成。',
+      'handling.insert': '现在切到待办 #{id}「{title}」：先用 todo_read 读它，再按里面的「下一步」继续；遇到不明白或暧昧不清的地方，主动用 DSH 的 ask_user_question 问我并等待回答，不要自行猜测，也不要把问题留到最后；改完后问我是否标记完成。',
       'handling.boundTo': '由会话 {id} 处理',
       'action.expand': '展开详情',
       'action.collapse': '收起详情',
@@ -277,7 +281,8 @@ window.__ModuleLoader__.load({
       'action.handle': 'Start task',
       'action.doing': 'In progress',
       'action.newSession': 'Start in new session',
-      'action.insertHere': 'Insert here',
+      'action.insertHere': 'Insert one-line hint',
+      'action.insertBrief': 'Insert task brief',
       'error.noWorkspace': 'This card has no usable workspace; pick one first',
       'error.noComposer': 'The composer is unavailable; the opening text is on its way, paste it manually',
       'error.createSession': 'Could not create the session',
@@ -296,6 +301,9 @@ window.__ModuleLoader__.load({
       'seed.briefTruncated': 'The brief exceeds 2,000 characters; goal/constraints/next action were kept first. Use todo_read for the rest.',
       'seed.briefWarnings': 'Brief warnings',
       'seed.noHistory': 'Do not read history automatically; if a read-back is truly needed, state the gap and use the Stage 2 approval path.',
+      'seed.ask': 'After receiving a task, proactively ask the user when something is unclear, missing, or ambiguous; do not guess.',
+      'handling.briefHeader': 'This is the task brief for existing card #{id}「{title}」; do not create a duplicate card.',
+      'handling.briefNote': 'If anything is unclear or ambiguous, ask me first; use todo_read #{id} for more detail.',
       'source.doc': 'doc',
       'source.code': 'code',
       'seed.hint': '(Read todo_read #{id} for more detail; append new findings with todo_note instead of rewriting the card; in this round, read code and existing materials and present a plan first — do not modify any files; start implementation only after the developer confirms the plan. If you need the developer to decide, confirm a plan, or supply missing information during the work, use the DSH ask_user_question tool while the task is running and wait for the answer; do not decide on your own and do not defer the question to the final reply. When the work is done, ask the developer whether to mark #{id} done, then call todo_status.)',
@@ -331,7 +339,7 @@ Keep in mind
       'rules.save': '保存',
       'rules.saved': '已保存',
       'rules.empty': '这个工作区还没有规则',
-      'handling.insert': 'Switch to todo #{id}「{title}」now: read it with todo_read first, then continue from its next step; when you need me to decide, confirm a plan, or supply missing information, use the DSH ask_user_question tool during the work and wait for my answer — do not decide on your own and do not defer the question to the end; ask me whether to mark it done when finished.',
+      'handling.insert': 'Switch to todo #{id}「{title}」now: read it with todo_read first, then continue from its next step; when anything is unclear or ambiguous, proactively ask me with the DSH ask_user_question tool and wait for my answer — do not guess, and do not defer questions to the end; ask me whether to mark it done when finished.',
       'handling.boundTo': 'Handled by session {id}',
       'action.expand': 'Show details',
       'action.collapse': 'Hide details',
@@ -1394,6 +1402,7 @@ Keep in mind
           }
           lines.push(`- ${t('seed.check')}`)
           lines.push(`- ${t('seed.noHistory')}`)
+          lines.push(`- ${t('seed.ask')}`)
           lines.push(fill2(t('seed.hint'), { id: detail.id }))
           return lines.join('\n')
         }
@@ -1460,11 +1469,9 @@ Keep in mind
           }
         }
 
-        /** Put the one-line handoff into this session's composer (no auto-send). */
-        function insertIntoCurrent(row) {
-          setHandlingMenu(null)
+        /** Put text into the current composer without sending it. */
+        function insertTextIntoComposer(text) {
           const actions = props.inputActions
-          const text = fill2(t('handling.insert'), { id: row.label ?? row.id, title: row.title })
           if (actions === undefined || actions === null) {
             setErrorText(t('error.noComposer'))
             return
@@ -1478,6 +1485,74 @@ Keep in mind
             } catch {
               setErrorText(t('error.noComposer'))
             }
+          }
+        }
+
+        /** Put the one-line handoff into this session's composer (no auto-send). */
+        function insertIntoCurrent(row) {
+          setHandlingMenu(null)
+          insertTextIntoComposer(fill2(t('handling.insert'), { id: row.label ?? row.id, title: row.title }))
+        }
+
+        /** Build a compact brief for the current composer, with a 2,000-char cap. */
+        function buildInsertBrief(detail) {
+          const id = detail.label ?? detail.id
+          const header = fill2(t('handling.briefHeader'), { id, title: detail.title })
+          const brief = detail.brief !== null && typeof detail.brief === 'object' ? detail.brief : null
+          const essential = []
+          const extra = []
+          const add = (target, label, text) => {
+            if (typeof text === 'string' && text.trim() !== '') target.push(`${label}: ${text.trim()}`)
+          }
+          const addList = (target, label, items) => {
+            const values = (Array.isArray(items) ? items : [])
+              .map((item) => `[${item.basis}] ${item.text}${item.impact === 'blocking' ? ' [blocking]' : ''}`)
+            if (values.length > 0) target.push(`${label}: ${values.join('；')}`)
+          }
+          if (brief !== null && detail.briefSource === 'stored') {
+            add(essential, t('detail.briefGoal'), brief.goal)
+            addList(essential, t('detail.briefConstraints'), brief.constraints)
+            add(essential, t('detail.briefNext'), brief.nextAction)
+            add(extra, t('detail.briefWhy'), brief.why)
+            addList(extra, t('detail.briefConfirmed'), brief.confirmed)
+            addList(extra, t('detail.briefLeads'), brief.leads)
+            addList(extra, t('detail.briefOpen'), brief.openQuestions)
+          } else {
+            const core = detail.core ?? {}
+            add(essential, t('detail.nextStep'), core.nextStep)
+            add(extra, t('detail.symptom'), core.symptom)
+            add(extra, t('detail.cause'), core.cause)
+            add(extra, t('detail.intent'), core.intent)
+          }
+          // Essential lines are always kept; optional detail fills the remaining budget.
+          const kept = [...essential]
+          let size = header.length + 1 + essential.reduce((sum, line) => sum + line.length + 1, 0)
+          if (size <= 2000) {
+            for (const line of extra) {
+              if (size + line.length + 1 > 2000) break
+              kept.push(line)
+              size += line.length + 1
+            }
+          }
+          if (kept.length === 0) kept.push(t('seed.briefMissing'))
+          const note = fill2(t('handling.briefNote'), { id })
+          return [header, ...kept, note].join('\n')
+        }
+
+        /** Fetch the card if needed, then insert its brief into the composer. */
+        async function insertBriefIntoCurrent(row) {
+          setHandlingMenu(null)
+          setErrorText('')
+          try {
+            let detail = details[row.id]
+            if (detail === undefined) {
+              const value = await call('detail', { id: row.id })
+              detail = value.item
+              setDetails((previous) => ({ ...previous, [row.id]: detail }))
+            }
+            insertTextIntoComposer(buildInsertBrief(detail))
+          } catch (error) {
+            setErrorText(errorTextOf(error))
           }
         }
 
@@ -2319,6 +2394,7 @@ Keep in mind
                   'div',
                   { className: 'tdash-popover tdash-popover-handle' },
                   h('button', { type: 'button', className: 'tdash-del', onClick: () => void startSessionFor(row) }, t('action.newSession')),
+                  h('button', { type: 'button', className: 'tdash-del', onClick: () => void insertBriefIntoCurrent(row) }, t('action.insertBrief')),
                   h('button', { type: 'button', className: 'tdash-del', onClick: () => insertIntoCurrent(row) }, t('action.insertHere')),
                 )
               : null,
