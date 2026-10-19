@@ -692,15 +692,12 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > 后来补了 `#MEMO` 别名、`major.minor` 编号、`todo_status`、输入框 `#db` 补全、`#` 引用框、
 > 筛选持久化与**工作区通用规则**（`rules` 表 + 新会话种子拼接）。`scripts/verify-domain.mjs` 通过 181/181。
 >
-> **Stage 1 / T1–T4 基础实现已完成；T5 / Gate 1 于 2026-10-19 严格复核为未通过**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
-> `brief.nextAction` 与 `nextStep` 的统一契约、brief 参与的重复检测、version-1 兼容均已实现。
-> 当前 `scripts/verify-domain.mjs` 通过 262/262，`scripts/verify-brief.mjs` 通过 118/118，`scripts/verify-recall.mjs` 通过 35/35，
-> `scripts/verify-gate1.mjs` 通过 63/63（S1–S10 39 项 + 契约/持久化 24 项），`scripts/verify-legacy.mjs` 通过 11/11，`git diff --check` 通过。
-> §8.0 的确定性 S1–S10 全部通过；隔离语义探针为 5 通过 / 4 部分 / 1 未定（S3 把已定约束写进 `confirmed`、S4 多塞一条 `verified` 元约束、
-> S5/S6 把阻塞缺口标成 `non-blocking`、S9 未经过 duplicate 门禁）。所有 `wouldCallRecall=false` 都是模型自述，不是调用轨迹。
-> **Gate 1 UI 冒烟已由开发者验证（2026-10-19）**：`#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。
-> **Gate 1 当前未通过**：上述语义字段问题需要改 `todo_add` 描述并重启 DSH 后重跑探针；真实 UI 十场景、真实 `todo_recall` 轨迹、旧插件 UI、
-> 真实用户存储的备份/恢复/迁移/回滚演练仍未验证。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
+> **Stage 1–3 已完成；Gate 1/2/3 通过（带范围限制，2026-10-19）。** TaskBrief、旧卡只读派生、brief-first 读取/UI、
+> `brief.nextAction` / `nextStep` 契约、brief 去重、version-1 兼容、来源/审批、真实 recall、交接种子和插入简报均已落地。
+> 测试：`verify-domain` 262/262、`verify-brief` 118/118、`verify-recall` 35/35、`verify-gate1` 63/63、`verify-legacy` 11/11，`git diff --check` 通过。
+> 真实 UI S1–S10、真实 `todo_recall` 轨迹、旧插件 UI（副本/测试工作区）、存储副本和场景 10 已验证；细节见
+> `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE2-REVIEW.md`、`docs/GATE3-REVIEW.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`。
+> 限制：旧插件/存储写回使用副本，未对真实 `~/.dsh` 做破坏性演练；S9 需明确指向 #6.25；S2 约束重复、S7 略多。Stage 4 未实现。
 
 > **与文档的已知偏差**（均为记录过的取舍，不是遗漏）：
 > 1. §7 的三路检测信号只实现"触及文件"；符号与 commit **已决定不做**（见 §7 的实现说明）；

@@ -236,8 +236,7 @@ See `docs/GATE1-T5-ACCEPTANCE.md`.
 
 **Scope limits:** the old-plugin UI and storage write-back were exercised on a copy/test workspace, not a destructive drill on the real `~/.dsh`; S9 needs an explicit pointer to #6.25; S2 has a duplicate constraint and S7 is slightly above minimal. The real UI ten scenarios, real `todo_recall`, old-plugin UI, storage copy, and scenario 10 are verified.
 
-Full history retrieval/authorization, brief-first handoff seeds, Project Plan, Markdown import/export, and
-drag-and-drop are not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older
+Project Plan, plan maintenance, card steps, drag handoff, and Markdown import/export are not implemented; brief-first handoff seeds (Stage 3) are complete. Full history retrieval/authorization is not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older
 schema strips `brief` and `sources`, so do not write new data back with an old version.
 
 ## Installation
