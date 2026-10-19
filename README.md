@@ -173,16 +173,15 @@ AI：如果本轮产生了值得保留的新证据，可以通过 note 追加到
 - brief 参与去重（共享文件 + 标题/目标相似度）；
 - version-1 旧数据兼容；真实旧代码 `be8ebf4` 探针显示降级会丢 `brief` 和 `sources`。
 
-**Gate 1/T5 未通过（2026-10-19 严格复核）。** 确定性验收通过，语义质量仍有缺口：
+**Gate 1/T5 仍未通过（2026-10-19 严格复核 + 语义修复后复跑）。** 确定性验收和语义探针都已通过，但真实运行验收未完成：
 验证依据：`node scripts/verify-brief.mjs` 118/118、`node scripts/verify-domain.mjs` 262/262、`node scripts/verify-recall.mjs` 35/35、
 `node scripts/verify-gate1.mjs` 63/63（S1–S10 39/39）、`node scripts/verify-legacy.mjs` 11/11、`git diff --check` 通过。
-§8.0 的确定性 S1–S10 全部通过；隔离语义探针为 5 通过 / 4 部分 / 1 未定：S3 把已定约束写进 `confirmed`，
-S4 多塞一条 `verified` 元约束，S5/S6 把阻塞缺口标成 `non-blocking`，S9 未经过 duplicate 门禁。
-所有 `wouldCallRecall=false` 都是模型自述，不是调用轨迹。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
+§8.0 的确定性 S1–S10 全部通过；修正后的隔离语义探针 10/10 通过（S3 约束进 constraints、S4 无多余 verified 元约束、S5/S6 的 blocking 与 nextAction 正确、S9 先问追加还是新建）。
+所有 `wouldCallRecall=false` 仍是模型自述，不是调用轨迹。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
 
 **Gate 1 UI 冒烟已由开发者验证（2026-10-19）：** `#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。UI 冒烟不等于十场景语义验收。
 
-**仍未验证（现在是 Gate 1 阻塞项）：** 修复 S3/S4/S5/S6 的字段语义与 impact 问题并重启后重跑探针；S9 在真实 duplicate 门禁后的行为；真实 UI 十场景和真实 `todo_recall` 轨迹；旧的已发布插件在真实 UI 中读写；真实用户存储的备份/恢复/升级/降级/迁移/回滚演练；场景 10 的真实模型复测。
+**仍未验证（现在是 Gate 1 阻塞项）：** 真实 UI 十场景和真实 `todo_recall` 轨迹；S9 在真实 duplicate 门禁后的行为；旧的已发布插件在真实 UI 中读写；真实用户存储的备份/恢复/升级/降级/迁移/回滚演练；场景 10 的真实模型复测。字段语义问题已修复，不再是阻塞项。
 
 当前未实现完整历史检索/授权、任务交接的 brief-first 种子、Project Plan、Markdown 导入导出和拖拽。
 升级前建议先备份 `~/.dsh/storages/todo_assistant.json`；旧版本 schema 会 strip 掉 `brief` 和 `sources`，

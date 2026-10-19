@@ -855,10 +855,10 @@ graph TD
 |---|---|---|
 | P0-BASE | 已完成 | version-1 fixture 可打开；原始 184 项基线不回归 |
 | T1 TaskBrief | 已完成基础实现 | optional brief、旧卡只读派生、brief-first 读取/UI；`verify-brief.mjs` 118/118 |
-| T2 当前上下文提炼 | 已完成基础实现；语义质量仍有问题 | 提示词、六类 basis、质量 warning；2026-10-19 隔离探针发现 constraints/confirmed 混用、impact 低估、合并未先确认等问题；真实工具调用轨迹未验证 |
+| T2 当前上下文提炼 | 已完成基础实现；语义探针已修复并复跑通过 | 提示词、六类 basis、质量 warning；2026-10-19 修复 constraints/confirmed 混用、impact 低估、合并未先确认等问题；真实工具调用轨迹仍未验证 |
 | T3 去重质量 | 已完成基础实现；duplicate UI 已由开发者验证（2026-10-19） | 共享文件 + 标题/目标相似度；不同目标保护；duplicate 返回候选、`forceCreate` 确认创建、`todo_note` 确认补充 |
 | T4 数据兼容 | 基础实现 + 真实旧代码探针；旧插件 UI 未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；另外用 `be8ebf4` 真实旧代码验证 `brief` 与 `sources` 会被 strip/写回丢失；**仍不是旧插件在真实 UI 中运行** |
-| T5 / Gate 1 | **未通过（2026-10-19 严格复核）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；隔离语义探针 5 通过 / 4 部分 / 1 未定；场景 10 确定性拒绝通过但真实运行时未复测；详见 `docs/GATE1-T5-ACCEPTANCE.md` |
+| T5 / Gate 1 | **仍未通过（语义已修复，真实运行未验收）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；修正后隔离语义探针 10/10 通过；场景 10 确定性拒绝通过但真实运行时未复测；详见 `docs/GATE1-T5-ACCEPTANCE.md` |
 
 验证基线（源码 `2839fe9` + 本次未提交的验收改动）：
 
@@ -869,13 +869,14 @@ graph TD
 - `node scripts/verify-legacy.mjs` → **11/11**（真实旧代码 `be8ebf4`）
 - `git diff --check` → **通过**
 
-运行时时序：2026-10-19 严格复核时 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；修复 S3/S4/S5/S6/S9 的提示词后为 **5493** 字符（sha256 `e9d22358…`）。S3/S4/S5/S9 已重跑通过；S6 仍会建卡、把缺口标成 non-blocking 且不主动问，因此 Gate 1 仍按**未通过**记录。
+运行时时序：2026-10-19 严格复核时 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；统一 blocking 语义后为 **6129** 字符（sha256 `8fa6fbad…`）。S3/S4/S5/S6/S9 已复跑通过；Gate 1 仍因真实 UI/旧插件/存储未验收而**未通过**。
 
 T5 语义探针结果（2026-10-19，隔离模式；原始输出见 `docs/GATE1-T5-PROBES.json`）：
 
 - 通过：S1、S2、S7、S8、S10；
-- 部分通过：S3（已定约束写进 `confirmed`）、S4（额外 `verified` 元约束）、S5（冲突标成 `non-blocking`）、S6（缺口标成 `non-blocking`，未主动问）；
-- 未定：S9（探针禁止调用工具，未经过 duplicate 门禁）；
+- 修正前部分通过：S3（约束写进 `confirmed`）、S4（额外 `verified` 元约束）、S5（冲突标成 `non-blocking`）、S6（缺口标成 `non-blocking`，未主动问）；
+- 修正前未定：S9（探针禁止调用工具，未经过 duplicate 门禁）；
+- **修正后复跑：S3/S4/S5/S6/S9 全部通过；隔离语义探针 10/10。**
 - 所有 `wouldCallRecall=false` 均为模型自述，不是工具调用轨迹。
 
 Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆盖）：
@@ -888,14 +889,13 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 仍未完成/未验证的事项（现在是 Gate 1 的阻塞项，不是“发布前风险”）：
 
-1. 修复 S3/S4/S5/S6 的字段语义与 impact 问题；需要改 `todo_add` 描述并重启 DSH 后重跑探针；
-2. S9 在真实 duplicate 门禁之后是否先询问开发者；
-3. 真实 DSH UI 中的十场景执行，以及真实的 `todo_recall` 调用轨迹；
-4. 旧的已发布插件在真实 UI 中读取/写回新数据；
-5. 真实用户存储的备份、恢复、升级、降级、迁移和回滚演练；
-6. 场景 10 的真实模型复测（确定性拒绝已通过，隔离探针选择先问）。
+1. S9 在真实 duplicate 门禁之后是否先询问开发者（隔离探针已先问）；
+2. 真实 DSH UI 中的十场景执行，以及真实的 `todo_recall` 调用轨迹；
+3. 旧的已发布插件在真实 UI 中读取/写回新数据；
+4. 真实用户存储的备份、恢复、升级、降级、迁移和回滚演练；
+5. 场景 10 的真实模型复测（确定性拒绝已通过，隔离探针选择先问）。
 
-> **Gate 1 状态：未通过（按 §6 严格条件，2026-10-19 复核）。** 确定性验收与 T1–T4 基础实现已完成；语义探针发现的字段语义问题、S9 合并确认、真实运行时/旧插件 UI 未验证，都是 §6 Gate 1 的未完成条件。
+> **Gate 1 状态：仍未通过（按 §6 严格条件，2026-10-19 复核并修复语义后）。** 确定性验收与 T1–T4 基础实现已完成；语义探针已修复并复跑 10/10 通过；真实运行时/旧插件 UI/真实存储仍未验收，仍是 §6 Gate 1 的未完成条件。
 
 ### 阶段 2：历史情报补全（A，后续阶段）
 
@@ -1490,7 +1490,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 **Gate 1 通过前，不启动 A/B/C/D/E 的产品实现。**
 
-> **Gate 1 状态（2026-10-19 严格复核）：未通过。** T1–T4 基础实现和 §8.0 的确定性部分已通过；隔离语义探针为 5 通过 / 4 部分 / 1 未定，字段语义与 impact 仍有问题，真实 UI/`todo_recall` 轨迹和旧插件 UI 未验证。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
+> **Gate 1 状态（2026-10-19 严格复核并修复）：仍未通过。** T1–T4 基础实现、§8.0 确定性和修正后语义探针（10/10）已通过；真实 UI/`todo_recall` 轨迹、旧插件 UI 和真实存储仍未验收。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
 
 ### Gate 2：历史情报补全（Stage 2，后续）
 
@@ -1592,7 +1592,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 > Gate 1 的核心验收表。场景 10 是**强制失败用例**：任何“来源指针完整、任务简报为空/只有标题路径”的卡片都不得通过。表中“额外调查”指是否需要历史读取；Stage 1 默认不读取历史。
 >
-> **2026-10-19 复核结果**：确定性 S1–S10 通过（39/39；脚本总计 63/63）；隔离语义探针 5 通过 / 4 部分 / 1 未定。逐项证据与未验证项见 `docs/GATE1-T5-ACCEPTANCE.md`；Gate 1 当前**未通过**。
+> **2026-10-19 复核结果**：确定性 S1–S10 通过（39/39；脚本总计 63/63）；修正后隔离语义探针 10/10 通过。逐项证据与未验证项见 `docs/GATE1-T5-ACCEPTANCE.md`；Gate 1 当前**仍未通过**，但阻塞项只剩真实运行时/旧插件/存储。
 
 T5 必须优先验证：
 
@@ -1632,7 +1632,7 @@ T5 必须优先验证：
 |---|---|---|
 | 现有基线 | 184 项起不回归；当前 262/262 | `node scripts/verify-domain.mjs` |
 | **T1** | brief schema round-trip、旧卡投影、简单/复杂 brief、长度上限、`todo_read` brief-first、旧卡不写回 | `scripts/verify-domain.mjs`、`scripts/verify-brief.mjs` |
-| **T2** | 当前可见提炼/质量提示断言、六类 basis、推断不写成决定、不自动 recall、source-only 失败 | 行为探针 + 提示词断言；2026-10-19 隔离探针发现 S3/S4/S5/S6 的字段语义问题 |
+| **T2** | 当前可见提炼/质量提示断言、六类 basis、推断不写成决定、不自动 recall、source-only 失败 | 行为探针 + 提示词断言；2026-10-19 修复字段语义并复跑通过 |
 | **T3** | 重复检测/合并/similar goal/不同任务不误拦/输出可解释 | 纯函数 + `scripts/verify-domain.mjs`、`scripts/verify-gate1.mjs` |
 | **T4** | version-1 fixture、brief optional、durability、未知字段/降级记录、表断言 | `scripts/verify-domain.mjs` + fixture；`scripts/verify-legacy.mjs`（真实旧代码 `be8ebf4`） |
 | **T5 / Gate 1** | §8.0 十个场景；场景 10 必须失败；简报质量/无必要读取/重复/兼容 | `scripts/verify-gate1.mjs`（确定性 39/39）、`scripts/verify-gate1-probes.mjs` + `docs/GATE1-T5-PROBES.json`（隔离探针回放）；逐项结果见 `docs/GATE1-T5-ACCEPTANCE.md` |
