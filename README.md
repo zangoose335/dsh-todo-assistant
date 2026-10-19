@@ -183,7 +183,7 @@ AI：如果本轮产生了值得保留的新证据，可以通过 note 追加到
 
 **范围限制：** 旧插件 UI 和存储写回使用副本/测试工作区，未对真实 `~/.dsh` 做破坏性升级/降级；S9 需要用户明确指向 #6.25；S2 约束有重复、S7 比最简多两个字段。真实 UI 十场景、真实 `todo_recall`、旧插件 UI、存储副本和场景 10 均已验证。
 
-当前未实现 Project Plan、计划持续维护、卡片步骤、拖拽交接和 Markdown 导入导出；Stage 3 的 brief-first 新会话和插入简报已完成。
+当前未实现 Project Plan、计划持续维护、卡片步骤和 Markdown 导入导出；Stage 3 的 brief-first 新会话和插入简报已完成。卡片拖拽只插入可见引用（如 `#6.24「…」`），完整正文通过三个操作按钮插入，不做拖拽后自动展开上下文。
 升级前建议先备份 `~/.dsh/storages/todo_assistant.json`；旧版本 schema 会 strip 掉 `brief` 和 `sources`，
 不要用旧版本写回新数据。
 
