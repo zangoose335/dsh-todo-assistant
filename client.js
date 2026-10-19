@@ -2099,7 +2099,10 @@ Keep in mind
           if (event.dataTransfer !== null && event.dataTransfer !== undefined) {
             event.dataTransfer.effectAllowed = 'move'
             try {
-              event.dataTransfer.setData('text/plain', row.id)
+              const visibleRef = row.label === null || row.label === undefined
+                ? (row.title === '' ? row.id : row.title)
+                : `#${row.label}「${row.title}」`
+              event.dataTransfer.setData('text/plain', `${visibleRef} `)
               // A lifted clone follows the pointer; no native translucent ghost.
               const cardElement = event.currentTarget
               const rect = cardElement.getBoundingClientRect()
