@@ -78,7 +78,7 @@ window.__ModuleLoader__.load({
         if (raw === null) return { mode: 'time-desc', order: [] }
         const parsed = JSON.parse(raw)
         const legacy = parsed?.mode === 'time' ? 'time-desc' : parsed?.mode === 'number' ? 'number-desc' : parsed?.mode
-        const valid = ['time-asc', 'time-desc', 'number-asc', 'number-desc', 'manual']
+        const valid = ['time-asc', 'time-desc', 'number-asc', 'number-desc', 'relevance', 'manual']
         const mode = valid.includes(legacy) ? legacy : 'time-desc'
         const order = Array.isArray(parsed?.order) ? parsed.order.filter((id) => typeof id === 'string' && id !== '') : []
         return { mode, order: mode === 'manual' ? order : [] }
@@ -111,6 +111,7 @@ window.__ModuleLoader__.load({
       'sort.timeDesc': '时间 ↓',
       'sort.numberAsc': '编号 ↑',
       'sort.numberDesc': '编号 ↓',
+      'sort.relevance': '相关性',
       'view.open': '未完成',
       'view.all': '全部',
       'view.defect': '待修复',
@@ -275,6 +276,7 @@ window.__ModuleLoader__.load({
       'sort.timeDesc': 'Time ↓',
       'sort.numberAsc': 'Number ↑',
       'sort.numberDesc': 'Number ↓',
+      'sort.relevance': 'Relevance',
       'view.open': 'Unfinished',
       'view.all': 'All',
       'view.defect': 'To fix',
@@ -2053,6 +2055,11 @@ Keep in mind
             if (left !== undefined) return -1
             if (right !== undefined) return 1
           }
+          if (sortMode === 'relevance') {
+            const related = Number(b.hit === true) - Number(a.hit === true)
+            if (related !== 0) return related
+            return byTime(a, b)
+          }
           return sortMode.startsWith('number') ? byNumber(a, b) : byTime(a, b)
         })
         const sortLabelOf = (mode) => {
@@ -2060,7 +2067,8 @@ Keep in mind
           if (mode === 'time-asc') return t('sort.timeAsc')
           if (mode === 'time-desc') return t('sort.timeDesc')
           if (mode === 'number-asc') return t('sort.numberAsc')
-          return t('sort.numberDesc')
+          if (mode === 'number-desc') return t('sort.numberDesc')
+          return t('sort.relevance')
         }
 
         function chooseSort(mode) {
@@ -2234,7 +2242,7 @@ Keep in mind
               ? h(
                   'div',
                   { className: 'tdash-sort-pop', role: 'menu' },
-                  ['time-asc', 'time-desc', 'number-asc', 'number-desc'].map((mode) =>
+                  ['time-asc', 'time-desc', 'number-asc', 'number-desc', 'relevance'].map((mode) =>
                     h(
                       'button',
                       {
