@@ -31,6 +31,13 @@ window.__ModuleLoader__.load({
     const STATUSES = ['open', 'doing', 'done', 'dropped']
     const STATUS_LABEL = { open: 'status.open', doing: 'status.doing', done: 'status.done', dropped: 'status.dropped' }
     const KIND_LABEL = { defect: 'kind.defect', idea: 'kind.idea' }
+    /** Form order; also the fallback when the active view names no kind. */
+    const KINDS = ['defect', 'idea']
+
+    /** Kind preselected for a new card: the active view wins when it names one. */
+    function defaultKind(viewId) {
+      return viewId === 'defect' || viewId === 'idea' ? viewId : KINDS[0]
+    }
     const VIEWS = [
       { id: 'open', label: 'view.open' },
       { id: 'defect', label: 'view.defect' },
@@ -74,8 +81,8 @@ window.__ModuleLoader__.load({
       'status.doing': '处理中',
       'status.done': '已完成',
       'status.dropped': '已放弃',
-      'kind.defect': '缺陷',
-      'kind.idea': '想法',
+      'kind.defect': '待修复',
+      'kind.idea': '待添加',
       'action.new': '新建待办',
       'action.delete': '删除',
       'action.archive': '归档',
@@ -119,6 +126,7 @@ window.__ModuleLoader__.load({
       'capture.messageNote': '补充：',
       'card.handling': '处理中',
       'action.handle': '开始任务',
+      'action.doing': '正在处理',
       'action.newSession': '新会话中立即执行',
       'action.insertHere': '插入当前会话',
       'error.noWorkspace': '这张卡没有可用的工作区，先切换到一个工作区',
@@ -131,6 +139,12 @@ window.__ModuleLoader__.load({
       'seed.files': '触及文件',
       'seed.commit': '写卡时提交',
       'seed.notes': '已有 {n} 条补充（todo_read part=notes 可看）',
+      'seed.fileSources': '参考文件/文档',
+      'seed.verified': '已核实',
+      'seed.unverified': '未核实',
+      'seed.check': '参考文件/文档只是线索：先确认是否存在、是否仍适用，只读与任务相关的部分；卡片事实与文档冲突时，以实际核实为准并告知开发者。',
+      'source.doc': '文档',
+      'source.code': '代码',
       'seed.hint': '（需要更多细节用 todo_read #{id}；有新发现用 todo_note 追加，不要重写卡片；本轮先只读代码和现有资料并给出方案，不要修改任何文件；方案经开发者确认后再开始实现。处理过程中如果需要开发者做决定、确认方案或补充信息，使用 DSH 的 ask_user_question 工具在过程中提问并等待回答，不要自行决定，也不要把问题留到完成后的回复。完成后主动问开发者是否把 #{id} 标记为完成，确认后再调 todo_status。）',
       'seed.rules': '本工作区的通用规则：',
       'rules.title': '设置通用规则',
@@ -187,6 +201,7 @@ window.__ModuleLoader__.load({
       'detail.park': '备查',
       'detail.files': '触及文件',
       'detail.notes': '补充',
+      'note.noResult': '查过无结果',
       'detail.origin': '来源',
       'detail.commit': '提交',
       'detail.nextStep': '下一步',
@@ -256,6 +271,7 @@ window.__ModuleLoader__.load({
       'capture.messageNote': 'Note:',
       'card.handling': 'In progress',
       'action.handle': 'Start task',
+      'action.doing': 'In progress',
       'action.newSession': 'Start in new session',
       'action.insertHere': 'Insert here',
       'error.noWorkspace': 'This card has no usable workspace; pick one first',
@@ -268,6 +284,12 @@ window.__ModuleLoader__.load({
       'seed.files': 'Files',
       'seed.commit': 'Captured at commit',
       'seed.notes': '{n} note(s) already exist (todo_read part=notes)',
+      'seed.fileSources': 'Reference files/docs',
+      'seed.verified': 'verified',
+      'seed.unverified': 'not verified',
+      'seed.check': 'Reference files/docs are clues: confirm they exist and still apply, read only the relevant parts, and if they conflict with card facts, trust the actual check and tell the developer.',
+      'source.doc': 'doc',
+      'source.code': 'code',
       'seed.hint': '(Read todo_read #{id} for more detail; append new findings with todo_note instead of rewriting the card; in this round, read code and existing materials and present a plan first — do not modify any files; start implementation only after the developer confirms the plan. If you need the developer to decide, confirm a plan, or supply missing information during the work, use the DSH ask_user_question tool while the task is running and wait for the answer; do not decide on your own and do not defer the question to the final reply. When the work is done, ask the developer whether to mark #{id} done, then call todo_status.)',
       'seed.rules': '本工作区的通用规则：',
       'rules.title': 'Workspace rules',
@@ -323,6 +345,7 @@ Keep in mind
       'detail.park': 'Parked',
       'detail.files': 'Files',
       'detail.notes': 'Notes',
+      'note.noResult': 'checked, no result',
       'detail.origin': 'Origin',
       'detail.commit': 'Commit',
       'detail.nextStep': 'Next step',
@@ -362,9 +385,14 @@ Keep in mind
 .tdash-view[data-on="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); box-shadow: 0 2px 6px rgba(0,0,0,.18), inset 0 0 0 1px var(--dsw-alias-border-l1); }
 .tdash-view .tdash-n { margin-left: 4px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .tdash-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 6px; }
-.tdash-card { box-sizing: border-box; min-height: 86px; position: relative; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+.tdash-card { box-sizing: border-box; min-height: 86px; flex: 0 0 auto; position: relative; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
 .tdash-card[data-status="done"], .tdash-card[data-status="dropped"] { opacity: .62; }
-.tdash-row1 { display: flex; align-items: flex-start; gap: 6px; padding-right: 24px; }
+.tdash-row1 { display: flex; align-items: center; gap: 6px; min-height: 20px; padding-right: 24px; }
+.tdash-row1 .tdash-radio { margin-top: 0; }
+.tdash-titlerow { display: flex; align-items: flex-start; gap: 6px; }
+.tdash-kindtag { flex: 0 0 auto; font-size: 11px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
+.tdash-card[data-kind="defect"] .tdash-kindtag { color: var(--dsw-alias-state-error-primary); }
+.tdash-card[data-kind="idea"] .tdash-kindtag { color: var(--dsw-alias-state-business-primary); }
 .tdash-radio { flex: none; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; padding: 0; border-radius: 50%; border: 2px solid var(--dsw-alias-border-l3); background: transparent; cursor: pointer; position: relative; transition: border-color .15s ease, transform .15s ease; }
 .tdash-radio[data-done="true"] { animation: tdash-radio-pop .22s ease-out; }
 @keyframes tdash-radio-pop { 0% { transform: scale(.8); } 60% { transform: scale(1.16); } 100% { transform: scale(1); } }
@@ -393,6 +421,8 @@ Keep in mind
 .tdash-start { box-sizing: border-box; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
 .tdash-start:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-start[data-on="true"] { background: var(--dsw-alias-interactive-bg-hover); }
+.tdash-start[data-doing="true"] { background: var(--dsw-alias-state-success-primary); border-color: var(--dsw-alias-state-success-primary); color: #fff; box-shadow: 0 0 0 1px var(--dsw-alias-state-success-primary), 0 0 12px var(--dsw-alias-state-success-primary); }
+.tdash-start[data-doing="true"]:hover { background: var(--dsw-alias-state-success-primary); opacity: .92; }
 .tdash-popover { position: absolute; top: 6px; right: 6px; z-index: 6; display: flex; gap: 4px; padding: 4px; border-radius: 8px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 .tdash-popover-handle { top: auto; bottom: 28px; flex-direction: column; align-items: stretch; }
 .tdash-popover .tdash-del { justify-content: flex-start; }
@@ -429,6 +459,9 @@ Keep in mind
 .tdash-kinds { display: flex; gap: 4px; }
 .tdash-kind { flex: 0 0 auto; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); border-radius: 999px; padding: 2px 10px; font-size: 11px; cursor: pointer; }
 .tdash-kind[data-on="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); }
+.tdash-kind[data-on="true"][data-kind="defect"] { background: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); color: #fff; box-shadow: 0 0 0 1px var(--dsw-alias-state-error-primary), 0 0 12px var(--dsw-alias-state-error-primary); }
+.tdash-kind[data-on="true"][data-kind="idea"] { background: var(--dsw-alias-state-business-primary); border-color: var(--dsw-alias-state-business-primary); color: #fff; box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary), 0 0 12px var(--dsw-alias-state-business-primary); }
+.tdash-kind[data-on="true"][data-kind="defect"]:hover, .tdash-kind[data-on="true"][data-kind="idea"]:hover { opacity: .92; }
 .tdash-actions { display: flex; align-items: center; gap: 6px; }
 .tdash-btn { border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-primary); border-radius: 6px; font-size: 11px; padding: 3px 10px; cursor: pointer; }
 .tdash-btn:hover { background: var(--dsw-alias-bg-layer-2); }
@@ -966,7 +999,7 @@ Keep in mind
             },
             h('span', { className: 'tpick-no' }, `#${item.label ?? item.id}`),
             h('span', { className: 'tpick-title' }, item.title),
-            h('span', { className: 'tpick-meta' }, `${item.status}/${item.kind}`),
+            h('span', { className: 'tpick-meta' }, `${item.status}/${item.kind === 'defect' ? 'bug' : item.kind}`),
           )
         return h(
           'div',
@@ -1289,6 +1322,17 @@ Keep in mind
           if (commit !== undefined && commit !== '') lines.push(`- ${t('seed.commit')}: ${String(commit).slice(0, 7)}${detail.code.branch === '' ? '' : ` (${detail.code.branch})`}`)
           const notes = (detail.notes ?? []).length
           if (notes > 0) lines.push(`- ${fill(t('seed.notes'), notes)}`)
+          const fileSources = (detail.sources ?? []).filter((source) => source.kind === 'file')
+          if (fileSources.length > 0) {
+            lines.push(`- ${t('seed.fileSources')}:`)
+            for (const source of fileSources.slice(0, 8)) {
+              const purpose = source.purpose === 'doc' ? t('source.doc') : source.purpose === 'code' ? t('source.code') : source.purpose
+              const status = source.verified === true ? t('seed.verified') : t('seed.unverified')
+              lines.push(`  - ${source.label}${purpose === undefined ? '' : ` (${purpose})`} — ${status}`)
+            }
+            if (fileSources.length > 8) lines.push(`  - …+${fileSources.length - 8}`)
+          }
+          lines.push(`- ${t('seed.check')}`)
           lines.push(fill2(t('seed.hint'), { id: detail.id }))
           return lines.join('\n')
         }
@@ -1306,6 +1350,8 @@ Keep in mind
         async function startSessionFor(row) {
           setHandlingMenu(null)
           setErrorText('')
+          const previousStatus = row.status
+          if (previousStatus !== 'doing') patchRow(row.id, { status: 'doing' })
           try {
             let detail = details[row.id]
             if (detail === undefined) {
@@ -1334,6 +1380,11 @@ Keep in mind
             const created = await sessionRemote.create(request)
             if (created.ok !== true) throw new Error(`${t('error.createSession')}: ${created.error.code}`)
             const sessionId = created.value.sessionId
+            try {
+              await call('handle', { id: row.id, sessionId })
+            } catch {
+              // Binding is for automatic "doing" detection; a failed bind must not block the session.
+            }
             const prompted = await sessionRemote.prompt({
               sessionId,
               requestId: requestId(),
@@ -1343,6 +1394,7 @@ Keep in mind
             if (prompted.ok !== true) throw new Error(`${t('error.prompt')}: ${prompted.error.code}`)
             ctx.uiWorkspace.openSession(sessionId)
           } catch (error) {
+            if (previousStatus !== 'doing') patchRow(row.id, { status: previousStatus })
             setErrorText(errorTextOf(error))
           }
         }
@@ -1826,7 +1878,7 @@ Keep in mind
               'data-on': draft === null ? 'false' : 'true',
               onClick: () => {
                 setPendingDelete(null)
-                setDraft(draft === null ? { title: '', kind: 'defect', nextStep: '' } : null)
+                setDraft(draft === null ? { title: '', kind: defaultKind(view), nextStep: '' } : null)
               },
             },
             draft === null ? '+' : '×',
@@ -1909,13 +1961,14 @@ Keep in mind
                   h(
                     'div',
                     { className: 'tdash-kinds' },
-                    ['defect', 'idea'].map((kind) =>
+                    KINDS.map((kind) =>
                       h(
                         'button',
                         {
                           key: kind,
                           type: 'button',
                           className: 'tdash-kind',
+                          'data-kind': kind,
                           'data-on': draft.kind === kind ? 'true' : 'false',
                           onClick: () => {
                             setDraft({ ...draft, kind })
@@ -2058,7 +2111,7 @@ Keep in mind
                 h(
                   'div',
                   { key: `n${index}`, className: 'tdash-note' },
-                  h('div', { className: 'tdash-note-text' }, `${index + 1}. ${note.text}`),
+                  h('div', { className: 'tdash-note-text' }, `${index + 1}. ${note.kind === 'no-result' ? `[${t('note.noResult')}] ` : ''}${note.text}`),
                   h(
                     'button',
                     {
@@ -2129,9 +2182,10 @@ Keep in mind
               type: 'button',
               className: 'tdash-start',
               'data-on': handlingMenu === row.id ? 'true' : 'false',
+              'data-doing': row.status === 'doing' ? 'true' : 'false',
               onClick: () => setHandlingMenu(handlingMenu === row.id ? null : row.id),
             },
-            t('action.handle'),
+            row.status === 'doing' ? t('action.doing') : t('action.handle'),
           )
 
           return h(
@@ -2152,9 +2206,8 @@ Keep in mind
                   moveCardToView(event.currentTarget, row.id, done ? 'open' : 'done')
                 },
               }),
+              h('span', { className: 'tdash-kindtag' }, t(KIND_LABEL[row.kind])),
               row.label === null || row.label === undefined ? null : h('span', { className: 'tdash-no' }, `#${row.label}`),
-              titleNode,
-              row.hit === true ? h('span', { className: 'tdash-hit' }, t('card.hit')) : null,
               h(
                 'button',
                 {
@@ -2165,6 +2218,12 @@ Keep in mind
                 },
                 h('span', { className: 'tdash-x' }, '×'),
               ),
+            ),
+            h(
+              'div',
+              { className: 'tdash-titlerow' },
+              titleNode,
+              row.hit === true ? h('span', { className: 'tdash-hit' }, t('card.hit')) : null,
             ),
             row.nextStep === '' ? null : h('div', { className: 'tdash-next' }, row.nextStep),
             h(
