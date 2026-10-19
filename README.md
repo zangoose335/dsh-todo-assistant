@@ -111,8 +111,14 @@ brief 可以建卡，只提供 nextStep 仍兼容；两者冲突时以 brief 为
 `requirement`（开发者要求）、`decided`（已确认决定）、`verified`（已验证事实）、
 `inferred`（AI 推断）、`unknown`（未知）或 `superseded`（已被替代）；推断不会被写成已确认事实。
 
+只有来源指针、没有实质任务说明的输入会被拒绝：无 brief 且只有 `touchedFiles`/`park`/`symbols` 时返回
+`todo/brief-required`，brief 只有 leads 时返回 `todo/brief-source-only`，`forceCreate` 也不能绕过。
+旧式调用只给 `nextStep`、不带来源字段时仍然兼容；带真实文件路径时按“只有路径”处理，需要补简报或至少一条
+`mustRead` 事实。
+
 旧卡没有 brief 时，插件从 `core`、`mustRead`、`park` 和 `touchedFiles` 派生只读简报。派生信息只用于读取，
-不会批量改写旧数据；旧卡的可信度默认按 `unknown` 处理，不能当成已验证事实。
+不会批量改写旧数据；旧卡的可信度默认按 `unknown` 处理，不能当成已验证事实。派生简报不能凭空补出
+confirmed/constraints，也不会把 `mustRead` 自动升级为已验证。
 
 开发者原话由 Host 从用户消息中保存，不依赖 AI 转述，因此可以用来核对 AI
 是否误解了原始需求。带 `#DB`/`#MEMO` 标记时，标记内的文本会完整保存；没有标记时，AI 只摘取与当前待办有关的那几句。若模型没有给出摘录，多段消息只保存第一段；第一段只是创建指令时不保存 request。
@@ -160,22 +166,26 @@ AI：如果本轮产生了值得保留的新证据，可以通过 note 追加到
 
 ## 当前阶段与限制
 
-当前已完成 P0-BASE、T1–T4 的基础实现和 T5/Gate 1 验收：
+当前已完成 P0-BASE、T1–T4 的基础实现；T5/Gate 1 于 2026-10-19 严格复核为**未通过**：
 
 - TaskBrief 创建、持久化、读取、旧卡派生和右栏展示；
-- `brief.nextAction` 与旧 `nextStep` 的统一契约；
+- `brief.nextAction` 与旧 `nextStep` 的统一契约；只给 brief 或只给旧 `nextStep` 都可建卡，冲突时以 brief 为准并返回 warning；
 - brief 参与去重（共享文件 + 标题/目标相似度）；
-- version-1 旧数据兼容，以及 brief 持久化和降级风险模拟。
+- version-1 旧数据兼容；真实旧代码 `be8ebf4` 探针显示降级会丢 `brief` 和 `sources`。
 
-**Gate 1/T5 已按 `docs/PLAN.md` §6 的正式验收条件通过；该结论适用于已提交并推送的 `f7e3a98`，不是已发布版本的验证。**
-验证依据：`node scripts/verify-brief.mjs` 117/117、`node scripts/verify-domain.mjs` 193/193、`git diff --check` 通过；十个场景中场景 1–9 有真实模型/确定性证据，场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝保证；场景 7 已在最新 3641 字符工具描述下完成两次独立测试。除场景 7 外，场景 1–9 的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
+**Gate 1/T5 未通过（2026-10-19 严格复核）。** 确定性验收通过，语义质量仍有缺口：
+验证依据：`node scripts/verify-brief.mjs` 118/118、`node scripts/verify-domain.mjs` 262/262、`node scripts/verify-recall.mjs` 35/35、
+`node scripts/verify-gate1.mjs` 63/63（S1–S10 39/39）、`node scripts/verify-legacy.mjs` 11/11、`git diff --check` 通过。
+§8.0 的确定性 S1–S10 全部通过；隔离语义探针为 5 通过 / 4 部分 / 1 未定：S3 把已定约束写进 `confirmed`，
+S4 多塞一条 `verified` 元约束，S5/S6 把阻塞缺口标成 `non-blocking`，S9 未经过 duplicate 门禁。
+所有 `wouldCallRecall=false` 都是模型自述，不是调用轨迹。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
 
-**Gate 1 UI 冒烟已由开发者验证（2026-10-19）：** `#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。
+**Gate 1 UI 冒烟已由开发者验证（2026-10-19）：** `#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。UI 冒烟不等于十场景语义验收。
 
-**发布前仍未验证（不阻塞 §6 代码 Gate）：** 真实旧版本读写兼容、备份/恢复/升级/降级/迁移/回滚演练、场景 C 澄清探针。补齐前不得把发布检查描述为已完成。
+**仍未验证（现在是 Gate 1 阻塞项）：** 修复 S3/S4/S5/S6 的字段语义与 impact 问题并重启后重跑探针；S9 在真实 duplicate 门禁后的行为；真实 UI 十场景和真实 `todo_recall` 轨迹；旧的已发布插件在真实 UI 中读写；真实用户存储的备份/恢复/升级/降级/迁移/回滚演练；场景 10 的真实模型复测。
 
 当前未实现完整历史检索/授权、任务交接的 brief-first 种子、Project Plan、Markdown 导入导出和拖拽。
-升级前建议先备份 `~/.dsh/storages/todo_assistant.json`；旧版本 schema 可能 strip 掉新 `brief` 字段，
+升级前建议先备份 `~/.dsh/storages/todo_assistant.json`；旧版本 schema 会 strip 掉 `brief` 和 `sources`，
 不要用旧版本写回新数据。
 
 ## 安装方式

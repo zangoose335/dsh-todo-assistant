@@ -1,0 +1,238 @@
+{
+  "meta": {
+    "date": "2026-10-19",
+    "mode": "isolated model probe (subagents); the probe forbade tool calls, so this is not a live DSH UI run and not a tool-call trace",
+    "model": "deepseek-flash (session default)",
+    "toolDescriptionChars": 3641,
+    "toolDescriptionSha256Prefix": "66ca102c",
+    "caveat": "wouldCallRecall is self-report. S9 did not exercise the duplicate gate because the probe forbade calling todo_add; live behavior may differ.",
+    "artifact": "Recorded probe outputs. Replay through the real tool with node scripts/verify-gate1-probes.mjs; verdicts are in docs/GATE1-T5-ACCEPTANCE.md."
+  },
+  "scenarios": [
+    {
+      "id": "S1",
+      "context": "开发者说：「把『设置页增加深色模式开关』记成待办。只改设置页，不动主题系统；下一步先确认现有主题切换入口。」当前可见上下文：设置页在 SettingsView.swift；现有设置页没有主题入口。除此之外没有别的可见信息。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "明确建卡请求，目标、边界和下一步都已给出；不追问、不读历史。",
+      "args": {
+        "title": "设置页增加深色模式开关",
+        "kind": "idea",
+        "touchedFiles": ["SettingsView.swift"],
+        "mustRead": [],
+        "nextStep": "先确认现有主题切换入口在哪里（当前设置页没有主题入口）",
+        "brief": {
+          "goal": "在设置页增加深色模式开关",
+          "constraints": [{ "text": "只改设置页，不改动主题系统", "basis": "requirement" }],
+          "nextAction": "先确认现有主题切换入口（当前设置页没有主题入口）"
+        }
+      }
+    },
+    {
+      "id": "S2",
+      "context": "开发者说：「把『支持导出 CSV』记成待办。要求：不引入第三方依赖；先确认现有导出入口。」当前可见上下文：只有这条需求，没有具体代码文件。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "需求原文已完整给出功能点和两条约束；没有文件可看，也不需要回读历史。",
+      "args": {
+        "title": "支持导出 CSV（无第三方依赖）",
+        "kind": "idea",
+        "touchedFiles": [],
+        "mustRead": [],
+        "brief": {
+          "goal": "实现『支持导出 CSV』，且不引入第三方依赖",
+          "nextAction": "先确认现有导出入口（定位现有导出相关代码/入口），确认后再在其上实现 CSV 导出",
+          "constraints": [
+            { "text": "不引入第三方依赖", "basis": "requirement" },
+            { "text": "先确认现有导出入口，再动手实现", "basis": "requirement" }
+          ]
+        },
+        "requestExcerpt": "把『支持导出 CSV』记成待办。要求：不引入第三方依赖；先确认现有导出入口。"
+      }
+    },
+    {
+      "id": "S3",
+      "context": "开发者说：「记一下删除语言的反馈问题。已经定了：最后一种语言不允许删除；删除失败必须给反馈。下一步按这两个约束实现。」当前可见上下文：没有别的信息。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "两条已定约束和下一步都已给出，直接建 defect 卡。",
+      "args": {
+        "title": "删除语言失败缺少反馈",
+        "kind": "defect",
+        "symptom": "删除语言的反馈有问题（具体现象开发者未细说）",
+        "touchedFiles": [],
+        "mustRead": [],
+        "brief": {
+          "goal": "处理删除语言时的反馈问题：最后一种语言不允许删除，删除失败必须给出反馈",
+          "confirmed": [
+            { "text": "最后一种语言不允许删除", "basis": "decided" },
+            { "text": "删除失败必须给出反馈", "basis": "decided" }
+          ],
+          "nextAction": "按这两个约束实现：拦截最后一种语言的删除，并在删除失败时向用户给出反馈"
+        },
+        "requestExcerpt": "记一下删除语言的反馈问题。已经定了：最后一种语言不允许删除；删除失败必须给反馈。下一步按这两个约束实现。"
+      }
+    },
+    {
+      "id": "S4",
+      "context": "开发者说：「记一下删除后状态没刷新的问题。我猜是缓存没失效，但还没确认；也不确定是不是只在最后一种语言时出现。下一步先确认缓存路径。」当前可见上下文：只有开发者的描述，没有日志或代码证据。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "现象与下一步都有；猜测按 inferred/unknown 标注，不追问也不读历史。",
+      "args": {
+        "title": "删除后状态未刷新（疑缓存未失效）",
+        "kind": "defect",
+        "symptom": "删除操作后状态没有刷新。",
+        "cause": "疑似缓存未失效（开发者猜测，尚未确认）；另怀疑只在最后一种语言时出现。",
+        "nextStep": "先确认缓存路径：定位删除操作涉及的缓存键与失效时机，判断是否漏了失效调用。",
+        "touchedFiles": [],
+        "mustRead": [],
+        "brief": {
+          "goal": "定位并修复删除操作后状态未刷新的问题。",
+          "nextAction": "先确认缓存路径：定位删除操作涉及的缓存键与清/失效时机，判断是否漏了失效调用。",
+          "confirmed": [
+            { "text": "开发者猜测原因是缓存未失效，但尚未确认", "basis": "inferred" },
+            { "text": "是否只在最后一种语言时出现尚未确定", "basis": "unknown" }
+          ],
+          "constraints": [
+            { "text": "当前没有日志或代码证据，原因只是猜测，不能当结论", "basis": "verified" }
+          ],
+          "openQuestions": [
+            { "text": "该问题是否只在最后一种语言时出现？", "basis": "unknown", "impact": "non-blocking" }
+          ]
+        },
+        "requestExcerpt": "记一下删除后状态没刷新的问题。我猜是缓存没失效，但还没确认；也不确定是不是只在最后一种语言时出现。下一步先确认缓存路径。"
+      }
+    },
+    {
+      "id": "S5",
+      "context": "开发者说：「记一下登录入口的方案。之前说用方案 A，后来又说用方案 B，还没定。下一步先确认用哪个方案。」当前可见上下文：两条决定互相矛盾，没有新的裁决。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "任务本身清楚（记下未决状态），方案 A/B 的矛盾作为 openQuestion 记录。",
+      "args": {
+        "title": "登录入口方案 A/B 未定，待确认",
+        "kind": "idea",
+        "touchedFiles": [],
+        "mustRead": [],
+        "nextStep": "先确认登录入口采用方案 A 还是方案 B，确认后把结论补进该卡",
+        "brief": {
+          "goal": "记录登录入口方案的未决状态，便于后续跟进并最终拍板",
+          "nextAction": "先确认登录入口采用方案 A 还是方案 B，确认后把结论补进该卡",
+          "openQuestions": [
+            { "text": "登录入口最终采用方案 A 还是方案 B 尚未裁决", "basis": "unknown", "impact": "non-blocking" }
+          ]
+        },
+        "requestExcerpt": "记一下登录入口的方案。之前说用方案 A，后来又说用方案 B，还没定。下一步先确认用哪个方案。"
+      }
+    },
+    {
+      "id": "S6",
+      "context": "开发者说：「记一下删除反馈的问题。下一步先确认删除被拒绝时的期望行为，但还没说具体要什么反馈。」当前可见上下文：缺少影响实现正确性的关键信息（反馈形式、触发条件）。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "开发者明确要求记下且已给下一步；反馈形式与触发条件作为未知列入 openQuestions。",
+      "args": {
+        "title": "删除反馈问题待明确",
+        "kind": "defect",
+        "touchedFiles": [],
+        "mustRead": [],
+        "symptom": "删除相关的反馈存在问题（开发者未说明具体现象）",
+        "cause": "尚不清楚，开发者未说明",
+        "brief": {
+          "goal": "记录“删除反馈”的问题，并明确下一步为先确认删除被拒绝时的期望行为。",
+          "nextAction": "先确认删除被拒绝时的期望行为。",
+          "confirmed": [],
+          "constraints": [],
+          "leads": [],
+          "openQuestions": [
+            { "text": "删除被拒绝时期望的反馈形式是什么（提示文案、弹窗、Toast 等）", "basis": "unknown", "impact": "non-blocking" },
+            { "text": "反馈应在哪些删除被拒绝的场景下触发", "basis": "unknown", "impact": "non-blocking" }
+          ]
+        },
+        "requestExcerpt": "记一下删除反馈的问题。下一步先确认删除被拒绝时的期望行为，但还没说具体要什么反馈。"
+      }
+    },
+    {
+      "id": "S7",
+      "context": "开发者说：「记一下：支持批量导入，下一步先验证解析性能。」当前可见上下文：只有这一句，任务很简单。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "目标与下一步自足，直接建最小卡。",
+      "args": {
+        "title": "支持批量导入，先验证解析性能",
+        "kind": "idea",
+        "touchedFiles": [],
+        "mustRead": [],
+        "brief": {
+          "goal": "支持批量导入功能",
+          "nextAction": "先验证批量导入的解析性能"
+        },
+        "requestExcerpt": "记一下：支持批量导入，下一步先验证解析性能。"
+      }
+    },
+    {
+      "id": "S8",
+      "context": "开发者说：「记一下导出流程改造。背景：现有 JSON 导出无法在表格工具里用。约束：不引入第三方 CSV 库、保留原有 JSON 入口、字段顺序稳定。线索：Export.swift 和 Csv.swift。下一步先按已确认格式写解析器。还有一个未决：大文件是否需要流式导出。」当前可见上下文：以上信息足够。",
+      "decision": "create",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "信息足够且是单一改造任务，约束进 constraints、线索进 leads、未决进 openQuestions。",
+      "args": {
+        "title": "导出流程改造：让导出结果可被表格工具使用",
+        "kind": "idea",
+        "touchedFiles": ["Export.swift", "Csv.swift"],
+        "mustRead": [],
+        "nextStep": "按已确认的 CSV 格式在 Csv.swift 中编写导出解析器，Export.swift 保留原 JSON 入口",
+        "brief": {
+          "goal": "改造导出流程，使导出结果能被表格工具直接使用（现有 JSON 导出不行）。",
+          "why": "现有 JSON 导出无法在表格工具里使用，导出结果不可直接消费。",
+          "confirmed": [],
+          "constraints": [
+            { "text": "不引入第三方 CSV 库", "basis": "requirement" },
+            { "text": "保留原有 JSON 入口", "basis": "requirement" },
+            { "text": "字段顺序稳定", "basis": "requirement" }
+          ],
+          "leads": [
+            { "text": "Export.swift（开发者给的线索文件）", "basis": "requirement" },
+            { "text": "Csv.swift（开发者给的线索文件）", "basis": "requirement" }
+          ],
+          "nextAction": "按已确认的 CSV 格式编写导出解析器（Csv.swift），并保留 Export.swift 的 JSON 入口。",
+          "openQuestions": [
+            { "text": "大文件是否需要流式导出", "basis": "unknown", "impact": "non-blocking" }
+          ]
+        },
+        "requestExcerpt": "记一下导出流程改造。背景：现有 JSON 导出无法在表格工具里用。约束：不引入第三方 CSV 库、保留原有 JSON 入口、字段顺序稳定。线索：Export.swift 和 Csv.swift。下一步先按已确认格式写解析器。还有一个未决：大文件是否需要流式导出。"
+      }
+    },
+    {
+      "id": "S9",
+      "context": "开发者说：「记一下登录页无法继续的问题，还是刷新令牌那个。」当前可见上下文：已有一张卡 #4.29「刷新令牌失败」（目标：修复刷新令牌后 401；共享文件 Auth.swift；状态 open）。新信息：登录页也会受影响。",
+      "decision": "none",
+      "wouldCallRecall": false,
+      "questions": [],
+      "rationale": "开发者说「还是刷新令牌那个」，指向已有卡 #4.29；不新建卡，追加一条 note。探针不允许调用工具，因此没有实际追加，也没有经过 duplicate 门禁。",
+      "args": null
+    },
+    {
+      "id": "S10",
+      "context": "开发者说：「把之前对话里提到的那个文件记一下。」当前可见上下文：只有这一句；之前对话不可见（不允许回读），没有文件路径、目标、约束或下一步。",
+      "decision": "ask",
+      "wouldCallRecall": false,
+      "questions": [
+        "具体是哪个文件？请给出路径或文件名。",
+        "「记一下」是希望建成一张待办卡（后续要动这个文件），还是只是留个备忘？想记录的目标/下一步是什么？",
+        "是否允许我回读之前那段对话来定位这个文件？（当前上下文里看不到它，我不会自行回读）"
+      ],
+      "rationale": "只有一句指代，文件路径、目标、下一步全缺，无法据实建卡，因此先问而不建。",
+      "args": null
+    }
+  ]
+}

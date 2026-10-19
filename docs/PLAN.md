@@ -849,24 +849,34 @@ graph TD
 - **测试要求**：见 §8 场景表；自动化 + 行为探针；记录输入/预期/实际。
 - **风险与兼容性**：质量判定主观；行为探针不可完全自动化；不能用 schema 通过代替质量通过。
 
-#### T3/T4/T5 实施状态（本轮验收）
+#### T3/T4/T5 实施状态（2026-10-19 严格复核）
 
 | 项 | 状态 | 证据/说明 |
 |---|---|---|
 | P0-BASE | 已完成 | version-1 fixture 可打开；原始 184 项基线不回归 |
-| T1 TaskBrief | 已完成基础实现 | optional brief、旧卡只读派生、brief-first 读取/UI；`verify-brief.mjs` 通过 |
-| T2 当前上下文提炼 | 已完成基础实现；真实模型覆盖场景 1–8 | 提示词、六类 basis、质量 warning；场景 1–8 卡片 basis 正确且未调用 `todo_recall`；C 探针未定义，列为发布前检查 |
+| T1 TaskBrief | 已完成基础实现 | optional brief、旧卡只读派生、brief-first 读取/UI；`verify-brief.mjs` 118/118 |
+| T2 当前上下文提炼 | 已完成基础实现；语义质量仍有问题 | 提示词、六类 basis、质量 warning；2026-10-19 隔离探针发现 constraints/confirmed 混用、impact 低估、合并未先确认等问题；真实工具调用轨迹未验证 |
 | T3 去重质量 | 已完成基础实现；duplicate UI 已由开发者验证（2026-10-19） | 共享文件 + 标题/目标相似度；不同目标保护；duplicate 返回候选、`forceCreate` 确认创建、`todo_note` 确认补充 |
-| T4 数据兼容 | 基础实现；真实旧版本未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；**模拟不等同真实旧插件** |
-| T5 / Gate 1 | **PASS（§6 正式条件；已提交并推送 f7e3a98）** | 十场景结果符合 §8.0；场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝；场景 7 在最新 3641 字符描述下两次独立测试通过（#6.1/#6.2）；除场景 7 外，场景 1–9 的证据主要来自较早描述版本；发布前风险见下 |
+| T4 数据兼容 | 基础实现 + 真实旧代码探针；旧插件 UI 未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；另外用 `be8ebf4` 真实旧代码验证 `brief` 与 `sources` 会被 strip/写回丢失；**仍不是旧插件在真实 UI 中运行** |
+| T5 / Gate 1 | **未通过（2026-10-19 严格复核）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；隔离语义探针 5 通过 / 4 部分 / 1 未定；场景 10 确定性拒绝通过但真实运行时未复测；详见 `docs/GATE1-T5-ACCEPTANCE.md` |
 
-Gate 1 验证基线（已提交并推送 f7e3a98）：
+验证基线（源码 `2839fe9` + 本次未提交的验收改动）：
 
-- `node scripts/verify-brief.mjs` → **117/117**
-- `node scripts/verify-domain.mjs` → **193/193**
+- `node scripts/verify-brief.mjs` → **118/118**
+- `node scripts/verify-domain.mjs` → **262/262**
+- `node scripts/verify-recall.mjs` → **35/35**
+- `node scripts/verify-gate1.mjs` → **63/63**（S1–S10 39 项 + 契约/持久化 24 项）
+- `node scripts/verify-legacy.mjs` → **11/11**（真实旧代码 `be8ebf4`）
 - `git diff --check` → **通过**
 
-运行时确认：重启后 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；场景 7 两次子代理请求头均为该版本。
+运行时确认：`todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`），与源码一致。
+
+T5 语义探针结果（2026-10-19，隔离模式；原始输出见 `docs/GATE1-T5-PROBES.json`）：
+
+- 通过：S1、S2、S7、S8、S10；
+- 部分通过：S3（已定约束写进 `confirmed`）、S4（额外 `verified` 元约束）、S5（冲突标成 `non-blocking`）、S6（缺口标成 `non-blocking`，未主动问）；
+- 未定：S9（探针禁止调用工具，未经过 duplicate 门禁）；
+- 所有 `wouldCallRecall=false` 均为模型自述，不是工具调用轨迹。
 
 Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆盖）：
 
@@ -876,16 +886,16 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - 窄窗口下标题、删除、展开、meta、处理按钮无重叠；
 - duplicate 提示可见、可选择追加/新建，未产生意外重复卡。
 
-发布前仍未完成/未验证的事项（不阻塞 §6 代码 Gate；UI 冒烟已完成项不在内）：
+仍未完成/未验证的事项（现在是 Gate 1 的阻塞项，不是“发布前风险”）：
 
-1. 真实模型在意图不明（场景 C）时是否稳定澄清；
-2. 场景 5 的真实模型是否主动调用 `ask_user_question`（#4.22 已能在卡片内指出冲突并给出 blocking openQuestions，满足 §8.0 的“指出冲突/询问”二选一；主动提问路径未验证）；
-3. 真实旧版本插件读取/写回新 brief 的行为；
-4. 真实备份、恢复、升级、降级、迁移和回滚演练；
-5. 场景 10 的真实模型重测（当前由确定性拒绝测试保证；`todo/brief-required` / `todo/brief-source-only` 已拒绝且不落库）；
-6. 场景 1–9 中除场景 7 外的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
+1. 修复 S3/S4/S5/S6 的字段语义与 impact 问题；需要改 `todo_add` 描述并重启 DSH 后重跑探针；
+2. S9 在真实 duplicate 门禁之后是否先询问开发者；
+3. 真实 DSH UI 中的十场景执行，以及真实的 `todo_recall` 调用轨迹；
+4. 旧的已发布插件在真实 UI 中读取/写回新数据；
+5. 真实用户存储的备份、恢复、升级、降级、迁移和回滚演练；
+6. 场景 10 的真实模型复测（确定性拒绝已通过，隔离探针选择先问）。
 
-> **Gate 1 状态：PASS（按 §6 正式条件，已提交并推送 f7e3a98）。** 上列 1–6 是发布前风险/检查，不是 §6 代码 Gate 的未完成条件；在补齐前，不得把发布检查描述为全部完成。
+> **Gate 1 状态：未通过（按 §6 严格条件，2026-10-19 复核）。** 确定性验收与 T1–T4 基础实现已完成；语义探针发现的字段语义问题、S9 合并确认、真实运行时/旧插件 UI 未验证，都是 §6 Gate 1 的未完成条件。
 
 ### 阶段 2：历史情报补全（A，后续阶段）
 
@@ -895,7 +905,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 > **不阻塞 Gate 1**：T1 已用 `brief.leads`/`sources` 保存当前上下文线索；A2 增加多来源、回读与来源追加，属于 Stage 2 的历史补全。
 
-> **状态（2026-10-19）**：source schema、store `addSource`/`findSource`、L0 来源计数、legacy `s0`/文件来源合成、`todo_read` 的 `sources`/`source:<sid>`、recall 多来源与 `firstBatch`/stats、mustRead/park/note 的 sourceIds 已落地；`verify-domain.mjs` 261/261。A3 的 `tools/pre-execute` ask guard、`gap`/`reason`/`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已接入；方案 A 的普通读取不落盘；真实审批探针已完成允许/拒绝。
+> **状态（2026-10-19）**：source schema、store `addSource`/`findSource`、L0 来源计数、legacy `s0`/文件来源合成、`todo_read` 的 `sources`/`source:<sid>`、recall 多来源与 `firstBatch`/stats、mustRead/park/note 的 sourceIds 已落地；`verify-domain.mjs` 262/262。A3 的 `tools/pre-execute` ask guard、`gap`/`reason`/`mode=first-batch`、surface 可见性标记、body 可见消息跳过与全可见 stop 已接入；方案 A 的普通读取不落盘；真实审批探针已完成允许/拒绝。
 
 - **目标与原因**：让一张卡片能引用创建卡片之前的任意历史轮次/片段，支持多个来源，并让 `todo_recall` 读取卡片实际引用的来源；来源只保存轻量指针，不保存正文，避免 Token 膨胀。
 - **当前问题**：`todo_add` 只写当前轮的 `origin.seqRange`（`tool.js:141-167`）；`recall.js:91-105` 只按该范围过滤；`mustRead/park` 的 `where` 只有一个指针（`domain.js:52-69`）；没有多来源模型；没有读取统计/去重；没有审批门禁。
@@ -1013,7 +1023,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 > **Gate 1 由 T5 判定**；A6 验收历史补全、授权、累计成本和冲突处理，不反向阻塞基础建卡。
 
-> **状态（2026-10-19）**：`scripts/verify-recall.mjs` 已加入 8 轮 fake log 的 35 项检查；`verify-domain.mjs` 261/261、`verify-brief.mjs` 118/118。真实审批允许/拒绝已实测，取消按钮不存在；同会话隐藏范围（seq 9..1554，536 条）实测无 visible、stop=false，确认压缩隐藏内容不会被误报为可见；manifest 已限制为 120 条，避免一次输出 536 条 / ~48 万估算 token。20 个场景的自动化/行为探针对照见 `docs/STAGE2-TEST-MATRIX.md`；建卡前 `session:current` 已实现、自动测试并通过真实审批（first-batch，当前轮排除，目录 120 条上限）；A4 冲突行为探针和模型行为探针仍未完成。
+> **状态（2026-10-19）**：`scripts/verify-recall.mjs` 已加入 8 轮 fake log 的 35 项检查；`verify-domain.mjs` 262/262、`verify-brief.mjs` 118/118。真实审批允许/拒绝已实测，取消按钮不存在；同会话隐藏范围（seq 9..1554，536 条）实测无 visible、stop=false，确认压缩隐藏内容不会被误报为可见；manifest 已限制为 120 条，避免一次输出 536 条 / ~48 万估算 token。20 个场景的自动化/行为探针对照见 `docs/STAGE2-TEST-MATRIX.md`；建卡前 `session:current` 已实现、自动测试并通过真实审批（first-batch，当前轮排除，目录 120 条上限）；A4 冲突行为探针和模型行为探针仍未完成。
 
 - **目标与原因**：把 A2-A5 的验收固化为可重复测试，覆盖当前可见优先、按需检索、有效轮次、DSH 审批、停止条件和 Token 效率；同时锁定“不会把无关主任务上下文全部复制进卡片”。
 - **当前问题**：现有 `scripts/verify-domain.mjs` 的 recall 测试只覆盖 origin 范围；DESIGN 的 181/181 已过时；没有开头首批/有效轮次/DSH 审批/Token 代理指标测试。
@@ -1480,6 +1490,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 **Gate 1 通过前，不启动 A/B/C/D/E 的产品实现。**
 
+> **Gate 1 状态（2026-10-19 严格复核）：未通过。** T1–T4 基础实现和 §8.0 的确定性部分已通过；隔离语义探针为 5 通过 / 4 部分 / 1 未定，字段语义与 impact 仍有问题，真实 UI/`todo_recall` 轨迹和旧插件 UI 未验证。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
+
 ### Gate 2：历史情报补全（Stage 2，后续）
 
 **完成条件**：
@@ -1492,7 +1504,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - 现有 184 项 + Gate 1 测试不回归。
 - 本 Gate 是辅助能力，不反向要求 Stage 1 变更；可延后。
 
-> **Gate 2 状态（2026-10-19）：通过（PASS，带已记录限制）。** 详情见 `docs/GATE2-REVIEW.md`；探针结果见 `docs/A6-A4-PROBES.md`。T1–T5 行为/审批实测，T6 由 C2/C2b 覆盖，T7/T10 使用自动代理，T8/T9 自动+实测；A4 C2b/C3/C4 通过，C1 夹具无效但明确替代由 C2b 覆盖；建卡前 `session:current` 已实现并通过真实审批；append-on-read 已被方案 A 取代；T7/T10 无独立模型会话、无精确 TokenUsage、审批取消/不可用依赖 DSH 契约。
+> **Gate 2 状态（2026-10-19）：通过（PASS，带已记录限制）。** 详情见 `docs/GATE2-REVIEW.md`；探针结果见 `docs/A6-A4-PROBES.md`。T1–T4 行为/审批实测；T5 的 Gate 1 严格复核未通过（见 `docs/GATE1-T5-ACCEPTANCE.md`），Gate 2 的通过不改变这一结论。T6 由 C2/C2b 覆盖，T7/T10 使用自动代理，T8/T9 自动+实测；A4 C2b/C3/C4 通过，C1 夹具无效但明确替代由 C2b 覆盖；建卡前 `session:current` 已实现并通过真实审批；append-on-read 已被方案 A 取代；T7/T10 无独立模型会话、无精确 TokenUsage、审批取消/不可用依赖 DSH 契约。
 
 ### Gate 3：任务交接质量（Stage 3，后续）
 
@@ -1520,7 +1532,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - DESIGN 更新新模型、MVP 范围、测试计数、已知偏差。
 - 每个 Gate 完成后同步对应文档，而不是最后一次性补。
 
-> **Gate Docs 状态（2026-10-19）**：README/README.en、DESIGN、PLAN 已同步到已推送的 `f7e3a98`；Gate 1 UI 冒烟已由开发者验证。发布前剩余风险见 §T5。
+> **Gate Docs 状态（2026-10-19 严格复核）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险与当前测试计数；`docs/GATE1-T5-ACCEPTANCE.md` 记录十场景逐项结果。Gate 1 UI 冒烟已由开发者验证，但 Gate 1 当前**未通过**；剩余阻塞项见 §T5。
 
 ---
 
@@ -1579,6 +1591,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 ### 8.0 Stage 1 卡片质量验收：10 个任务场景
 
 > Gate 1 的核心验收表。场景 10 是**强制失败用例**：任何“来源指针完整、任务简报为空/只有标题路径”的卡片都不得通过。表中“额外调查”指是否需要历史读取；Stage 1 默认不读取历史。
+>
+> **2026-10-19 复核结果**：确定性 S1–S10 通过（39/39；脚本总计 63/63）；隔离语义探针 5 通过 / 4 部分 / 1 未定。逐项证据与未验证项见 `docs/GATE1-T5-ACCEPTANCE.md`；Gate 1 当前**未通过**。
 
 T5 必须优先验证：
 
@@ -1616,12 +1630,12 @@ T5 必须优先验证：
 
 | 范围 | 测试 | 位置 |
 |---|---|---|
-| 现有基线 | 184/184 不回归 | `node scripts/verify-domain.mjs` |
-| **T1** | brief schema round-trip、旧卡投影、简单/复杂 brief、长度上限、`todo_read` brief-first、旧卡不写回 | `scripts/verify-domain.mjs` |
-| **T2** | 当前可见提炼/质量提示断言、六类 basis、推断不写成决定、不自动 recall、source-only 失败 | 行为探针 + 提示词断言 |
-| **T3** | 重复检测/合并/similar goal/不同任务不误拦/输出可解释 | 纯函数 + `scripts/verify-domain.mjs` |
-| **T4** | version-1 fixture、brief optional、durability、未知字段/降级记录、表断言 | `scripts/verify-domain.mjs` + fixture |
-| **T5 / Gate 1** | §8.0 十个场景；场景 10 必须失败；简报质量/无必要读取/重复/兼容 | 自动化 + 行为探针 |
+| 现有基线 | 184 项起不回归；当前 262/262 | `node scripts/verify-domain.mjs` |
+| **T1** | brief schema round-trip、旧卡投影、简单/复杂 brief、长度上限、`todo_read` brief-first、旧卡不写回 | `scripts/verify-domain.mjs`、`scripts/verify-brief.mjs` |
+| **T2** | 当前可见提炼/质量提示断言、六类 basis、推断不写成决定、不自动 recall、source-only 失败 | 行为探针 + 提示词断言；2026-10-19 隔离探针发现 S3/S4/S5/S6 的字段语义问题 |
+| **T3** | 重复检测/合并/similar goal/不同任务不误拦/输出可解释 | 纯函数 + `scripts/verify-domain.mjs`、`scripts/verify-gate1.mjs` |
+| **T4** | version-1 fixture、brief optional、durability、未知字段/降级记录、表断言 | `scripts/verify-domain.mjs` + fixture；`scripts/verify-legacy.mjs`（真实旧代码 `be8ebf4`） |
+| **T5 / Gate 1** | §8.0 十个场景；场景 10 必须失败；简报质量/无必要读取/重复/兼容 | `scripts/verify-gate1.mjs`（确定性 39/39）、`scripts/verify-gate1-probes.mjs` + `docs/GATE1-T5-PROBES.json`（隔离探针回放）；逐项结果见 `docs/GATE1-T5-ACCEPTANCE.md` |
 | **H1** | 新会话种子 brief-first、无自动历史、文档核对、上限 | 手工/文本断言 |
 | **H2** | 插入当前输入框 brief、不自动发送、不建卡、上限 | 手工/纯函数 |
 | **H3** | 新会话能理解 what/why/constraints/next；不重复调查；无额外历史 | 行为探针 |

@@ -280,12 +280,12 @@ interface Note {
 - `brief` 是 optional 字段；当前 `DOMAIN_VERSION` 仍为 `1`，没有新增必填字段或表。
 - `brief.nextAction` 是唯一规范来源；`core.nextStep` 是为旧客户端保留的兼容镜像。正常写入路径必须同步二者。
 - 旧卡没有 `brief` 时，`projectFull`/`todo_read` 从 `core.symptom`、`core.intent`、`core.cause`、`core.nextStep`、`mustRead`、`park`、`touchedFiles` 派生只读 brief；不回写存储。
-- 旧版本 schema 遇到新字段时的行为属于**降级风险**：当前实测的 zod schema 模拟会在读取时 strip `brief`，旧版本写回后该字段会从磁盘消失。因此升级前应备份 `~/.dsh/storages/todo_assistant.json`；不要在旧版本中写回新数据。
+- 旧版本 schema 遇到新字段时的行为属于**降级风险**：除了 `brief`，旧版本也不认识后续加入的 `sources`。2026-10-19 用真实旧代码 `be8ebf4`（引入 `brief` 前的最后一个提交）验证：旧代码能打开新文件，读取时 strip `brief` 与 `sources`，写回后两者从磁盘永久消失。因此升级前应备份 `~/.dsh/storages/todo_assistant.json`；旧版本只用于只读诊断，不要在旧版本中写回新数据。
 - 当前不做自动迁移。未来若出现不兼容的必填字段/结构变化，必须先提供备份、迁移和回滚方案，再提升 `DOMAIN_VERSION`；不能把“永远不升版本”当作原则。
-- 当前专项验证：`scripts/verify-brief.mjs` 覆盖 version-1 fixture、brief round-trip、旧卡派生、旧 schema strip/写回丢失模拟。
-- 备份/恢复：升级或尝试降级前，停止写入后复制 `~/.dsh/storages/todo_assistant.json`；恢复时关闭 DSH、替换文件、再启动。
+- 当前专项验证：`scripts/verify-brief.mjs` 覆盖 version-1 fixture、brief round-trip、旧卡派生、旧 schema strip/写回丢失模拟；`scripts/verify-gate1.mjs` 覆盖 §8.0 的确定性 S1–S10；`scripts/verify-legacy.mjs` 用 `be8ebf4` 的真实旧代码做读取/写回/备份恢复演练。
+- 备份/恢复：升级或尝试降级前，停止写入后复制 `~/.dsh/storages/todo_assistant.json`；恢复时关闭 DSH、替换文件、再启动。`verify-legacy.mjs` 的恢复断言只使用临时副本，不是对真实 `~/.dsh` 存储的演练。
   当前没有自动迁移步骤；若未来提升 `DOMAIN_VERSION`，必须同时提供迁移脚本和回滚到备份的步骤。
-- 降级风险：旧 schema 读取会 strip 未知 `brief`，写回会永久丢失该字段；因此旧版本只能用于只读诊断，
+- 降级风险：旧版本读取会 strip 未知 `brief`/`sources`，写回会永久丢失这两个字段；因此旧版本只能用于只读诊断，
   不要让旧版本写回新数据。
 
 **关键点**
@@ -319,8 +319,11 @@ interface Note {
 可选：`brief`、`nextStep`、`requestExcerpt`、`forceCreate`、`symptom`、`cause`、`intent`、`park`、`symbols`
 
 > `brief.nextAction` 是规范下一步。`nextStep` 只作为旧调用兼容镜像：
-> 只给 `brief` 可以建卡；只给 `nextStep` 仍兼容；两者同时给且冲突时以
+> 只给 `brief` 可以建卡；只给 `nextStep` 且不带来源字段仍兼容；两者同时给且冲突时以
 > `brief.nextAction` 为准并返回 warning；两者都缺时拒绝，绝不自动编造下一步。
+> 无 brief 且只有 `touchedFiles`/`park`/`symbols` 时返回 `todo/brief-required`；brief 只有 leads 时返回
+> `todo/brief-source-only`；`forceCreate` 不能绕过质量门禁。旧式 `nextStep` + 真实文件路径按“只有路径”处理，
+> 需要补简报或至少一条 `mustRead` 事实。
 > 去重命中时先返回候选，模型必须询问开发者；确认新建后才可传 `forceCreate:true`，确认补充则用 `todo_note`。
 
 handler 内校验，超限直接报错让它重写：
@@ -689,12 +692,15 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > 后来补了 `#MEMO` 别名、`major.minor` 编号、`todo_status`、输入框 `#db` 补全、`#` 引用框、
 > 筛选持久化与**工作区通用规则**（`rules` 表 + 新会话种子拼接）。`scripts/verify-domain.mjs` 通过 181/181。
 >
-> **Stage 1 / T1-T5 已完成；Gate 1 已按 `docs/PLAN.md` §6 正式条件通过（已提交并推送 f7e3a98）**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
-> `brief.nextAction` 与 `nextStep` 的统一契约、brief 参与的重复检测、version-1 兼容和旧 schema 降级模拟均已实现。
-> 当前 `scripts/verify-domain.mjs` 通过 261/261，`scripts/verify-brief.mjs` 通过 118/118，`git diff --check` 通过；Stage 2 的 `scripts/verify-recall.mjs` 通过 35/35，行为探针矩阵见 `docs/STAGE2-TEST-MATRIX.md`。
-> 十个场景中，场景 1–9 有真实模型/确定性证据，场景 10 由 `todo/brief-required` / `todo/brief-source-only` 拒绝；场景 7 已在最新 3641 字符工具描述下完成两次独立测试（#6.1/#6.2）。除场景 7 外，场景 1–9 的现有证据主要来自较早描述版本，尚未全部在 3641 版下重跑。
+> **Stage 1 / T1–T4 基础实现已完成；T5 / Gate 1 于 2026-10-19 严格复核为未通过**：TaskBrief schema、旧卡只读派生、brief-first 读取/UI、
+> `brief.nextAction` 与 `nextStep` 的统一契约、brief 参与的重复检测、version-1 兼容均已实现。
+> 当前 `scripts/verify-domain.mjs` 通过 262/262，`scripts/verify-brief.mjs` 通过 118/118，`scripts/verify-recall.mjs` 通过 35/35，
+> `scripts/verify-gate1.mjs` 通过 63/63（S1–S10 39 项 + 契约/持久化 24 项），`scripts/verify-legacy.mjs` 通过 11/11，`git diff --check` 通过。
+> §8.0 的确定性 S1–S10 全部通过；隔离语义探针为 5 通过 / 4 部分 / 1 未定（S3 把已定约束写进 `confirmed`、S4 多塞一条 `verified` 元约束、
+> S5/S6 把阻塞缺口标成 `non-blocking`、S9 未经过 duplicate 门禁）。所有 `wouldCallRecall=false` 都是模型自述，不是调用轨迹。
 > **Gate 1 UI 冒烟已由开发者验证（2026-10-19）**：`#` 引用框工作区筛选、完成/反向切换动画、减少动态效果、窄窗口布局、duplicate 提示均未发现问题。
-> **发布前仍未验证**：真实旧版本读写兼容、备份/恢复/迁移演练、场景 C 澄清探针；这些不阻塞 §6 代码 Gate，但在补齐前不得把发布检查描述为已完成。
+> **Gate 1 当前未通过**：上述语义字段问题需要改 `todo_add` 描述并重启 DSH 后重跑探针；真实 UI 十场景、真实 `todo_recall` 轨迹、旧插件 UI、
+> 真实用户存储的备份/恢复/迁移/回滚演练仍未验证。详见 `docs/GATE1-T5-ACCEPTANCE.md`。
 
 > **与文档的已知偏差**（均为记录过的取舍，不是遗漏）：
 > 1. §7 的三路检测信号只实现"触及文件"；符号与 commit **已决定不做**（见 §7 的实现说明）；

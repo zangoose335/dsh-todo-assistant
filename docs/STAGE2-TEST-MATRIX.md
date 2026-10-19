@@ -8,7 +8,7 @@
 ## 自动测试入口
 
 ```text
-node scripts/verify-domain.mjs   # 261/261
+node scripts/verify-domain.mjs   # 262/262
 node scripts/verify-recall.mjs   # 35/35
 node scripts/verify-brief.mjs    # 118/118
 ```

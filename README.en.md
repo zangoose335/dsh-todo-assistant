@@ -139,9 +139,15 @@ A simple task may contain only goal + nextAction; the other fields are not manda
 must say whether it is a `requirement`, `decided` decision, `verified` fact, `inferred` guess, `unknown`,
 or `superseded`. Inferences are never presented as confirmed facts.
 
+Source-only input is rejected: a capture with no brief and only `touchedFiles`/`park`/`symbols` returns
+`todo/brief-required`; a brief with only leads returns `todo/brief-source-only`; `forceCreate` does not
+bypass either check. A legacy call with only `nextStep` and no source fields remains compatible; with real
+file paths it is treated as path-only and must add a brief or at least one `mustRead` fact.
+
 When an old card has no brief, the plugin derives a read-only brief from `core`, `mustRead`, `park`, and
 `touchedFiles`. Derived data is never written back in bulk, and legacy facts without a basis are treated
-as `unknown`, not verified.
+as `unknown`, not verified. A derived brief cannot invent confirmed facts or constraints, and `mustRead`
+is not promoted to verified.
 
 The Host stores the developer's original request directly from the user
 message rather than relying on the AI to paraphrase it. With a `#DB`/`#MEMO`
@@ -212,23 +218,28 @@ AI to add useful new evidence to a card when appropriate.
 
 ## Current stage and limits
 
-P0-BASE and T1–T4 foundation work are implemented, and T5/Gate 1 acceptance has passed:
+P0-BASE and T1–T4 foundation work are implemented. T5/Gate 1 was strictly re-reviewed on 2026-10-19 and **did not pass**:
 
 -   TaskBrief creation, persistence, reading, legacy derivation, and sidebar display;
--   the `brief.nextAction` / legacy `nextStep` contract;
+-   the `brief.nextAction` / legacy `nextStep` contract: brief-only and legacy-nextStep-only captures both work, and a conflict resolves to the brief with a warning;
 -   brief-aware duplicate detection (shared file plus title/goal similarity);
--   version-1 compatibility, brief persistence, and a downgrade-risk simulation.
+-   version-1 compatibility; the real old code at `be8ebf4` drops `brief` and `sources` when it writes back.
 
-**Gate 1/T5 has passed the formal acceptance conditions in `docs/PLAN.md` §6. This conclusion applies to the committed and pushed `f7e3a98`; it is not a released-version verification.**
-Evidence: `node scripts/verify-brief.mjs` 117/117, `node scripts/verify-domain.mjs` 193/193, and `git diff --check` pass; among the ten scenarios, 1–9 have real-model/deterministic evidence and scenario 10 is covered by `todo/brief-required` / `todo/brief-source-only` rejection; scenario 7 was retested twice under the latest 3,641-character tool description. Except for scenario 7, the existing evidence for scenarios 1–9 mainly comes from earlier description versions and was not all re-run under the 3,641-character version.
+**Gate 1/T5 did not pass the strict review (2026-10-19).** Deterministic coverage passed; semantic quality still has gaps.
+Evidence: `node scripts/verify-brief.mjs` 118/118, `node scripts/verify-domain.mjs` 262/262, `node scripts/verify-recall.mjs` 35/35,
+`node scripts/verify-gate1.mjs` 63/63 (S1–S10 39/39), `node scripts/verify-legacy.mjs` 11/11, and `git diff --check` pass.
+All deterministic §8.0 scenarios S1–S10 pass. The isolated semantic probe found 5 pass / 4 partial / 1 inconclusive:
+S3 stored agreed constraints in `confirmed`, S4 added an extra `verified` meta-constraint, S5/S6 marked blocking gaps as
+`non-blocking`, and S9 never passed through the duplicate gate. Every `wouldCallRecall=false` is self-reported, not a tool-call trace.
+See `docs/GATE1-T5-ACCEPTANCE.md`.
 
-**Gate 1 UI smoke has been verified by the developer (2026-10-19):** the workspace filter in the `#` picker, completion/reverse animation, reduced motion, narrow layout, and the duplicate prompt showed no issues.
+**Gate 1 UI smoke has been verified by the developer (2026-10-19):** the workspace filter in the `#` picker, completion/reverse animation, reduced motion, narrow layout, and the duplicate prompt showed no issues. That smoke test is not the ten-scenario semantic acceptance.
 
-**Not yet verified before release (these do not block the §6 code Gate):** real older-version read/write compatibility, backup/restore/upgrade/downgrade/migration/rollback drills, and the scenario C clarification probe. Do not describe release checks as complete until these are done.
+**Still unverified (now Gate 1 blockers):** fixing the S3/S4/S5/S6 field-semantics and impact issues and re-running the probe after a restart; S9 behavior after the real duplicate gate; the ten scenarios in the real UI and a real `todo_recall` trace; the old published plugin reading/writing in the real UI; a real user-storage backup/restore/upgrade/downgrade/migration/rollback drill; and a real-model retest of scenario 10.
 
 Full history retrieval/authorization, brief-first handoff seeds, Project Plan, Markdown import/export, and
 drag-and-drop are not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older
-schema may strip the new `brief` field, so do not write new data back with an old version.
+schema strips `brief` and `sources`, so do not write new data back with an old version.
 
 ## Installation
 
