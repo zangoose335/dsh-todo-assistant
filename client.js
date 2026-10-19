@@ -125,11 +125,13 @@ window.__ModuleLoader__.load({
       'capture.messageHead': '请把下面这些记为待办（用 todo_add；如果判断不属于旁支，先问我）：',
       'capture.messageNote': '补充：',
       'card.handling': '处理中',
-      'action.handle': '开始任务',
       'action.doing': '正在处理',
       'action.newSession': '新会话中立即执行',
-      'action.insertHere': '插入一句提示',
+      'action.insertHere': '引用此待办',
       'action.insertBrief': '插入任务简报',
+      'tip.quote': '把一句“去看这张待办”的提示放进当前输入框，不自动发送。',
+      'tip.brief': '把目标、约束、下一步等任务简报放进当前输入框，不自动发送。',
+      'tip.newSession': '新建一个干净会话，自动发送完整任务开场。',
       'error.noWorkspace': '这张卡没有可用的工作区，先切换到一个工作区',
       'error.noComposer': '当前会话的输入框不可用，已复制开场内容，可手动粘贴',
       'error.createSession': '新开会话失败',
@@ -279,11 +281,13 @@ window.__ModuleLoader__.load({
       'capture.messageHead': 'Record the following as todos (use todo_add; if you judge they are not side tasks, ask me first):',
       'capture.messageNote': 'Note:',
       'card.handling': 'In progress',
-      'action.handle': 'Start task',
       'action.doing': 'In progress',
       'action.newSession': 'Start in new session',
-      'action.insertHere': 'Insert one-line hint',
+      'action.insertHere': 'Reference this todo',
       'action.insertBrief': 'Insert task brief',
+      'tip.quote': 'Put a short “look at this todo” hint into the current composer without sending it.',
+      'tip.brief': 'Put the goal, constraints, next action and task brief into the current composer without sending it.',
+      'tip.newSession': 'Create a clean session and send the full task opening automatically.',
       'error.noWorkspace': 'This card has no usable workspace; pick one first',
       'error.noComposer': 'The composer is unavailable; the opening text is on its way, paste it manually',
       'error.createSession': 'Could not create the session',
@@ -402,7 +406,7 @@ Keep in mind
 .tdash-view:hover { background: var(--dsw-alias-bg-layer-2); }
 .tdash-view[data-on="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-border-l2); box-shadow: 0 2px 6px rgba(0,0,0,.18), inset 0 0 0 1px var(--dsw-alias-border-l1); }
 .tdash-view .tdash-n { margin-left: 4px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
-.tdash-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.tdash-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 38px; display: flex; flex-direction: column; gap: 6px; }
 .tdash-card { box-sizing: border-box; min-height: 86px; flex: 0 0 auto; position: relative; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
 .tdash-card[data-status="done"], .tdash-card[data-status="dropped"] { opacity: .62; }
 .tdash-row1 { display: flex; align-items: center; gap: 6px; min-height: 20px; padding-right: 24px; }
@@ -436,13 +440,13 @@ Keep in mind
 .tdash-help-title { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); }
 .tdash-help-body { white-space: pre-wrap; word-break: break-word; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1.7; }
 .tdash-rules-btn[data-on="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
-.tdash-start { box-sizing: border-box; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
-.tdash-start:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.tdash-start[data-on="true"] { background: var(--dsw-alias-interactive-bg-hover); }
-.tdash-start[data-doing="true"] { background: var(--dsw-alias-state-success-primary); border-color: var(--dsw-alias-state-success-primary); color: #fff; box-shadow: 0 0 0 1px var(--dsw-alias-state-success-primary), 0 0 12px var(--dsw-alias-state-success-primary); }
-.tdash-start[data-doing="true"]:hover { background: var(--dsw-alias-state-success-primary); opacity: .92; }
+.tdash-handle { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.tdash-handle-btn { position: relative; box-sizing: border-box; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 10px; line-height: 1; cursor: pointer; white-space: nowrap; }
+.tdash-handle-btn:hover, .tdash-handle-btn:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.tdash-handle-btn::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; box-sizing: border-box; width: max-content; max-width: 230px; padding: 4px 7px; border-radius: 6px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 6px 18px rgba(0,0,0,.18); color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 1.45; white-space: normal; text-align: left; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.tdash-handle-btn:hover::after, .tdash-handle-btn:focus-visible::after { opacity: 1; }
+.tdash-doing { margin-left: auto; flex: 0 0 auto; font-size: 10px; line-height: 18px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--dsw-alias-state-success-primary); color: var(--dsw-alias-state-success-primary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 12%, transparent); box-shadow: 0 0 8px color-mix(in srgb, var(--dsw-alias-state-success-primary) 35%, transparent); }
 .tdash-popover { position: absolute; top: 6px; right: 6px; z-index: 6; display: flex; gap: 4px; padding: 4px; border-radius: 8px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-.tdash-popover-handle { top: auto; bottom: 28px; flex-direction: column; align-items: stretch; }
 .tdash-popover .tdash-del { justify-content: flex-start; }
 .tdash-popover .tdash-del:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-popover .tdash-del[data-danger="true"]:hover { color: var(--dsw-alias-state-error-primary); }
@@ -1255,7 +1259,6 @@ Keep in mind
         const reflowRef = React.useRef(null)
         // Detail expansion: which cards are open, and the fetched full card by id.
         const [expanded, setExpanded] = React.useState({})
-        const [handlingMenu, setHandlingMenu] = React.useState(null)
         const [details, setDetails] = React.useState({})
 
         const load = React.useCallback(async (silent) => {
@@ -1421,7 +1424,6 @@ Keep in mind
 
         /** Open a new session seeded with the card, then navigate to it. */
         async function startSessionFor(row) {
-          setHandlingMenu(null)
           setErrorText('')
           const previousStatus = row.status
           if (previousStatus !== 'doing') patchRow(row.id, { status: 'doing' })
@@ -1493,7 +1495,6 @@ Keep in mind
 
         /** Put the one-line handoff into this session's composer (no auto-send). */
         function insertIntoCurrent(row) {
-          setHandlingMenu(null)
           insertTextIntoComposer(fill2(t('handling.insert'), { id: row.label ?? row.id, title: row.title }))
         }
 
@@ -1544,7 +1545,6 @@ Keep in mind
 
         /** Fetch the card if needed, then insert its brief into the composer. */
         async function insertBriefIntoCurrent(row) {
-          setHandlingMenu(null)
           setErrorText('')
           try {
             let detail = details[row.id]
@@ -1561,16 +1561,15 @@ Keep in mind
 
         // A click anywhere outside an open popover closes it.
         React.useEffect(() => {
-          if (pendingDelete === null && handlingMenu === null) return undefined
+          if (pendingDelete === null) return undefined
           const onDown = (event) => {
             const target = event.target
             if (target instanceof Element && target.closest('.tdash-popover') !== null) return
             setPendingDelete(null)
-            setHandlingMenu(null)
           }
           document.addEventListener('mousedown', onDown, true)
           return () => document.removeEventListener('mousedown', onDown, true)
-        }, [pendingDelete, handlingMenu])
+        }, [pendingDelete])
 
         /** Load the current workspace's rules whenever the workspace changes. */
         React.useEffect(() => {
@@ -2316,15 +2315,11 @@ Keep in mind
 
           const done = row.status === 'done'
           const tail = h(
-            'button',
-            {
-              type: 'button',
-              className: 'tdash-start',
-              'data-on': handlingMenu === row.id ? 'true' : 'false',
-              'data-doing': row.status === 'doing' ? 'true' : 'false',
-              onClick: () => setHandlingMenu(handlingMenu === row.id ? null : row.id),
-            },
-            row.status === 'doing' ? t('action.doing') : t('action.handle'),
+            'div',
+            { className: 'tdash-handle' },
+            h('button', { type: 'button', className: 'tdash-handle-btn', 'data-tip': t('tip.quote'), 'aria-label': t('tip.quote'), onClick: () => insertIntoCurrent(row) }, t('action.insertHere')),
+            h('button', { type: 'button', className: 'tdash-handle-btn', 'data-tip': t('tip.brief'), 'aria-label': t('tip.brief'), onClick: () => void insertBriefIntoCurrent(row) }, t('action.insertBrief')),
+            h('button', { type: 'button', className: 'tdash-handle-btn', 'data-tip': t('tip.newSession'), 'aria-label': t('tip.newSession'), onClick: () => void startSessionFor(row) }, t('action.newSession')),
           )
 
           return h(
@@ -2347,6 +2342,7 @@ Keep in mind
               }),
               h('span', { className: 'tdash-kindtag' }, t(KIND_LABEL[row.kind])),
               row.label === null || row.label === undefined ? null : h('span', { className: 'tdash-no' }, `#${row.label}`),
+              row.status === 'doing' ? h('span', { className: 'tdash-doing' }, t('action.doing')) : null,
               h(
                 'button',
                 {
@@ -2390,15 +2386,6 @@ Keep in mind
                   h('button', { type: 'button', className: 'tdash-del', 'data-danger': 'true', onClick: () => removeRow(row.id) }, t('action.delete')),
                   h('button', { type: 'button', className: 'tdash-del', onClick: () => archiveRow(row.id) }, t('action.archive')),
                   h('button', { type: 'button', className: 'tdash-del', onClick: () => setPendingDelete(null) }, t('action.cancel')),
-                )
-              : null,
-            handlingMenu === row.id
-              ? h(
-                  'div',
-                  { className: 'tdash-popover tdash-popover-handle' },
-                  h('button', { type: 'button', className: 'tdash-del', onClick: () => void startSessionFor(row) }, t('action.newSession')),
-                  h('button', { type: 'button', className: 'tdash-del', onClick: () => void insertBriefIntoCurrent(row) }, t('action.insertBrief')),
-                  h('button', { type: 'button', className: 'tdash-del', onClick: () => insertIntoCurrent(row) }, t('action.insertHere')),
                 )
               : null,
             expanded[row.id] === true ? detailBody(row) : null,
