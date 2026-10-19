@@ -66,12 +66,45 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** One manual/auto order per workspace bucket + view. */
+    function orderStorageKey(scope, view) {
+      return `todo-assistant:order:${scope ?? '@none'}:${view}`
+    }
+
+    /** Read a saved sort mode and manual id order. */
+    function readOrderState(scope, view) {
+      try {
+        const raw = window.localStorage.getItem(orderStorageKey(scope, view))
+        if (raw === null) return { mode: 'time', order: [] }
+        const parsed = JSON.parse(raw)
+        const mode = parsed?.mode === 'number' || parsed?.mode === 'manual' ? parsed.mode : 'time'
+        const order = Array.isArray(parsed?.order) ? parsed.order.filter((id) => typeof id === 'string' && id !== '') : []
+        return { mode, order: mode === 'manual' ? order : [] }
+      } catch {
+        return { mode: 'time', order: [] }
+      }
+    }
+
+    /** Persist one order state; a failed write leaves the in-memory order valid. */
+    function storeOrderState(scope, view, mode, order) {
+      try {
+        window.localStorage.setItem(orderStorageKey(scope, view), JSON.stringify({ mode, order }))
+      } catch {
+        // Persistence is best effort; do not break the list.
+      }
+    }
+
     const ZH = {
       'tab.title': '待办助理',
       'tab.description': '旁支任务的现场快照：先记下来，之后单独会话处理',
       'scope.label': '范围',
       'scope.inbox': '收件箱',
       'scope.all': '全部工作区',
+      'sort.label': '排序',
+      'sort.time': '时间',
+      'sort.number': '编号',
+      'sort.manual': '手动',
+      'sort.tip': '切换按时间/编号排序；拖拽后固定为手动顺序',
       'view.open': '未完成',
       'view.all': '全部',
       'view.defect': '待修复',
@@ -227,6 +260,11 @@ window.__ModuleLoader__.load({
       'scope.label': 'Scope',
       'scope.inbox': 'Inbox',
       'scope.all': 'All workspaces',
+      'sort.label': 'Sort',
+      'sort.time': 'Time',
+      'sort.number': 'Number',
+      'sort.manual': 'Manual',
+      'sort.tip': 'Toggle time/number sorting; dragging fixes a manual order',
       'view.open': 'Unfinished',
       'view.all': 'All',
       'view.defect': 'To fix',
@@ -429,6 +467,12 @@ Keep in mind
 .tdash-expand { margin-left: -3px; }
 .tdash-topx .tdash-x { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; line-height: 1; transform: translateY(-1px); }
 .tdash-rules-btn { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
+.tdash-sort-btn { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
+.tdash-sort-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tdash-sort-btn:disabled { opacity: .55; cursor: default; }
+.tdash-card[draggable="true"] { cursor: grab; }
+.tdash-card[data-dragging="true"] { opacity: .55; cursor: grabbing; }
+.tdash-card[data-drop-target="true"] { border-color: var(--dsw-alias-brand-primary); box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary); }
 .tdash-rules-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tdash-info { flex: 0 0 auto; box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; }
 .tdash-info:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -1256,6 +1300,50 @@ Keep in mind
         // Detail expansion: which cards are open, and the fetched full card by id.
         const [expanded, setExpanded] = React.useState({})
         const [details, setDetails] = React.useState({})
+        // Manual order is per workspace bucket + view; a drag turns sorting off.
+        const [sortMode, setSortMode] = React.useState('time')
+        const [manualOrder, setManualOrder] = React.useState([])
+        const [draggingId, setDraggingId] = React.useState(null)
+        const [dropTargetId, setDropTargetId] = React.useState(null)
+        const orderBeforeRef = React.useRef(null)
+        const dragIdRef = React.useRef(null)
+
+        React.useEffect(() => {
+          const saved = readOrderState(scope, view)
+          setSortMode(saved.mode)
+          setManualOrder(saved.order)
+          setDraggingId(null)
+          setDropTargetId(null)
+          dragIdRef.current = null
+        }, [scope, view])
+
+        // FLIP the cards when a drag changes their order.
+        React.useLayoutEffect(() => {
+          const before = orderBeforeRef.current
+          if (before === null) return
+          orderBeforeRef.current = null
+          if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true) return
+          for (const element of document.querySelectorAll('.tdash-card')) {
+            const id = element.getAttribute('data-row-id')
+            if (id === null) continue
+            const oldTop = before.get(id)
+            if (oldTop === undefined) continue
+            const newTop = element.getBoundingClientRect().top
+            const delta = oldTop - newTop
+            if (Math.abs(delta) <= 1) continue
+            try {
+              element.animate(
+                [
+                  { transform: `translateY(${delta}px)` },
+                  { transform: 'translateY(0)' },
+                ],
+                { duration: 190, easing: 'cubic-bezier(.2,.8,.25,1)' },
+              )
+            } catch {
+              // Animation is optional.
+            }
+          }
+        }, [rows])
 
         const load = React.useCallback(async (silent) => {
           if (scope === null) {
@@ -1922,6 +2010,81 @@ Keep in mind
           return row.kind === view
         })
 
+        const byTime = (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || (b.createdAt ?? 0) - (a.createdAt ?? 0)
+        const byNumber = (a, b) => (b.major ?? -1) - (a.major ?? -1) || (b.minor ?? -1) - (a.minor ?? -1)
+        const manualRank = new Map(manualOrder.map((id, index) => [id, index]))
+        const shownSorted = [...shown].sort((a, b) => {
+          if (sortMode === 'manual') {
+            const left = manualRank.get(a.id)
+            const right = manualRank.get(b.id)
+            if (left !== undefined && right !== undefined) return left - right
+            if (left !== undefined) return -1
+            if (right !== undefined) return 1
+          }
+          return sortMode === 'number' ? byNumber(a, b) : byTime(a, b)
+        })
+
+        function cycleSort() {
+          if (sortMode === 'manual') return
+          const next = sortMode === 'time' ? 'number' : 'time'
+          setSortMode(next)
+          setManualOrder([])
+          storeOrderState(scope, view, next, [])
+        }
+
+        function applyManualOrder(ids) {
+          const rank = new Map(ids.map((id, index) => [id, index]))
+          const selected = rows.filter((row) => rank.has(row.id)).sort((a, b) => rank.get(a.id) - rank.get(b.id))
+          if (selected.length === 0) return
+          let cursor = 0
+          const nextRows = rows.map((row) => (rank.has(row.id) ? selected[cursor++] : row))
+          const body = document.querySelector('.tdash-body')
+          const before = captureCardTops(body)
+          if (before !== undefined) orderBeforeRef.current = before
+          setSortMode('manual')
+          setManualOrder(ids)
+          storeOrderState(scope, view, 'manual', ids)
+          setRows(nextRows)
+        }
+
+        function beginDrag(row, event) {
+          if (event.target instanceof Element && event.target.closest('button, input, textarea, select, a') !== null) {
+            event.preventDefault()
+            return
+          }
+          dragIdRef.current = row.id
+          setDraggingId(row.id)
+          setDropTargetId(null)
+          if (event.dataTransfer !== null && event.dataTransfer !== undefined) {
+            event.dataTransfer.effectAllowed = 'move'
+            try {
+              event.dataTransfer.setData('text/plain', row.id)
+            } catch {
+              // Some browsers reject custom drag data; order still works in-session.
+            }
+          }
+        }
+
+        function dragOverRow(rowId, event) {
+          if (dragIdRef.current === null || dragIdRef.current === rowId) return
+          event.preventDefault()
+          if (event.dataTransfer !== null && event.dataTransfer !== undefined) event.dataTransfer.dropEffect = 'move'
+          setDropTargetId(rowId)
+          const from = shownSorted.findIndex((row) => row.id === dragIdRef.current)
+          const to = shownSorted.findIndex((row) => row.id === rowId)
+          if (from < 0 || to < 0 || from === to) return
+          const ids = shownSorted.map((row) => row.id)
+          const [moved] = ids.splice(from, 1)
+          ids.splice(to, 0, moved)
+          applyManualOrder(ids)
+        }
+
+        function finishDrag() {
+          dragIdRef.current = null
+          setDraggingId(null)
+          setDropTargetId(null)
+        }
+
         const scopeOptions = [
           ...workspaceRows.map((workspace) => ({
             value: workspace.path,
@@ -1961,6 +2124,18 @@ Keep in mind
                 },
                 t('rules.title'),
               ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'tdash-sort-btn',
+              title: t('sort.tip'),
+              'aria-label': t('sort.tip'),
+              disabled: sortMode === 'manual',
+              onClick: cycleSort,
+            },
+            `${t('sort.label')} · ${t(sortMode === 'time' ? 'sort.time' : sortMode === 'number' ? 'sort.number' : 'sort.manual')}`,
+          ),
           h(
             'button',
             {
@@ -2320,7 +2495,23 @@ Keep in mind
 
           return h(
             'div',
-            { key: row.id, className: 'tdash-card', 'data-row-id': row.id, 'data-kind': row.kind, 'data-status': row.status },
+            {
+              key: row.id,
+              className: 'tdash-card',
+              'data-row-id': row.id,
+              'data-kind': row.kind,
+              'data-status': row.status,
+              'data-dragging': draggingId === row.id ? 'true' : 'false',
+              'data-drop-target': dropTargetId === row.id ? 'true' : 'false',
+              draggable: true,
+              onDragStart: (event) => beginDrag(row, event),
+              onDragOver: (event) => dragOverRow(row.id, event),
+              onDrop: (event) => {
+                event.preventDefault()
+                finishDrag()
+              },
+              onDragEnd: finishDrag,
+            },
             h(
               'div',
               { className: 'tdash-row1' },
@@ -2406,7 +2597,7 @@ Keep in mind
             h('div', null, t('empty.hint')),
           )
         } else {
-          body = shown.map(card)
+          body = shownSorted.map(card)
         }
 
         return h(
