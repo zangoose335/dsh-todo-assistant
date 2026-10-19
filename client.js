@@ -143,6 +143,10 @@ window.__ModuleLoader__.load({
       'seed.verified': '已核实',
       'seed.unverified': '未核实',
       'seed.check': '参考文件/文档只是线索：先确认是否存在、是否仍适用，只读与任务相关的部分；卡片事实与文档冲突时，以实际核实为准并告知开发者。',
+      'seed.briefMissing': '这张卡没有可用简报；请先补充目标、约束和下一步，或按授权回读来源。',
+      'seed.briefTruncated': '简报超过 2000 字，已优先保留目标/约束/下一步；其余用 todo_read 补。',
+      'seed.briefWarnings': '简报提示',
+      'seed.noHistory': '不要自动读取历史；如确需回读，先说明缺口并按 Stage 2 审批。',
       'source.doc': '文档',
       'source.code': '代码',
       'seed.hint': '（需要更多细节用 todo_read #{id}；有新发现用 todo_note 追加，不要重写卡片；本轮先只读代码和现有资料并给出方案，不要修改任何文件；方案经开发者确认后再开始实现。处理过程中如果需要开发者做决定、确认方案或补充信息，使用 DSH 的 ask_user_question 工具在过程中提问并等待回答，不要自行决定，也不要把问题留到完成后的回复。完成后主动问开发者是否把 #{id} 标记为完成，确认后再调 todo_status。）',
@@ -288,6 +292,10 @@ window.__ModuleLoader__.load({
       'seed.verified': 'verified',
       'seed.unverified': 'not verified',
       'seed.check': 'Reference files/docs are clues: confirm they exist and still apply, read only the relevant parts, and if they conflict with card facts, trust the actual check and tell the developer.',
+      'seed.briefMissing': 'This card has no usable brief; ask the developer to add the goal, constraints, and next action, or read the source with approval.',
+      'seed.briefTruncated': 'The brief exceeds 2,000 characters; goal/constraints/next action were kept first. Use todo_read for the rest.',
+      'seed.briefWarnings': 'Brief warnings',
+      'seed.noHistory': 'Do not read history automatically; if a read-back is truly needed, state the gap and use the Stage 2 approval path.',
       'source.doc': 'doc',
       'source.code': 'code',
       'seed.hint': '(Read todo_read #{id} for more detail; append new findings with todo_note instead of rewriting the card; in this round, read code and existing materials and present a plan first — do not modify any files; start implementation only after the developer confirms the plan. If you need the developer to decide, confirm a plan, or supply missing information during the work, use the DSH ask_user_question tool while the task is running and wait for the answer; do not decide on your own and do not defer the question to the final reply. When the work is done, ask the developer whether to mark #{id} done, then call todo_status.)',
@@ -1295,20 +1303,72 @@ Keep in mind
           if (typeof rulesText === 'string' && rulesText.trim() !== '') {
             lines.push('', `${t('seed.rules')}`, rulesText.trim(), '')
           }
-          if (detail.request !== null && detail.request !== undefined) {
-            lines.push(`- ${t('detail.request')}:`)
-            lines.push(detail.request.text)
+          const brief = detail.brief !== null && typeof detail.brief === 'object' ? detail.brief : null
+          const request = detail.request
+          const addBriefItem = (target, label, text) => {
+            if (typeof text === 'string' && text.trim() !== '') target.push(`${label}: ${text.trim()}`)
           }
-          const core = detail.core ?? {}
-          const labeled = [
-            ['detail.symptom', core.symptom],
-            ['detail.cause', core.cause],
-            ['detail.intent', core.intent],
-          ]
-          for (const [key, value] of labeled) {
-            if (value !== undefined && value !== '') lines.push(`- ${t(key)}: ${value}`)
+          const addBriefList = (target, label, items) => {
+            const values = (Array.isArray(items) ? items : [])
+              .map((item) => `[${item.basis}] ${item.text}${item.impact === 'blocking' ? ' [blocking]' : ''}`)
+            if (values.length > 0) target.push(`${label}: ${values.join('；')}`)
           }
-          if (core.nextStep !== undefined && core.nextStep !== '') lines.push(`- ${t('detail.nextStep')}: ${core.nextStep}`)
+          if (brief !== null && detail.briefSource === 'stored') {
+            const essential = []
+            const extra = []
+            addBriefItem(essential, t('detail.briefGoal'), brief.goal)
+            addBriefList(essential, t('detail.briefConstraints'), brief.constraints)
+            addBriefItem(essential, t('detail.briefNext'), brief.nextAction)
+            addBriefItem(extra, t('detail.briefWhy'), brief.why)
+            addBriefList(extra, t('detail.briefConfirmed'), brief.confirmed)
+            addBriefList(extra, t('detail.briefLeads'), brief.leads)
+            addBriefList(extra, t('detail.briefOpen'), brief.openQuestions)
+            // Goal/constraints/next-action are always kept, even if that exceeds
+            // the 2,000-character target; extras are added only while they fit.
+            const kept = [...essential]
+            let size = essential.reduce((sum, line) => sum + line.length + 1, 0)
+            let truncated = size > 2000
+            if (!truncated) {
+              for (const line of extra) {
+                if (size + line.length + 1 > 2000) {
+                  truncated = true
+                  break
+                }
+                kept.push(line)
+                size += line.length + 1
+              }
+            }
+            lines.push(`- ${t('detail.brief')}:`)
+            for (const line of kept) lines.push(`  ${line}`)
+            if (truncated) lines.push(`  ${t('seed.briefTruncated')}`)
+            if (!brief.goal || !brief.nextAction) lines.push(`- ${t('seed.briefMissing')}`)
+            const warnings = detail.briefWarnings ?? []
+            if (warnings.length > 0) {
+              lines.push(`- ${t('seed.briefWarnings')}: ${warnings.slice(0, 3).join('；')}`)
+            }
+            if (request !== null && request !== undefined) {
+              lines.push(`- ${t('detail.request')}:`)
+              lines.push(request.text)
+            }
+          } else {
+            if (request !== null && request !== undefined) {
+              lines.push(`- ${t('detail.request')}:`)
+              lines.push(request.text)
+            }
+            const core = detail.core ?? {}
+            const labeled = [
+              ['detail.symptom', core.symptom],
+              ['detail.cause', core.cause],
+              ['detail.intent', core.intent],
+            ]
+            for (const [key, value] of labeled) {
+              if (value !== undefined && value !== '') lines.push(`- ${t(key)}: ${value}`)
+            }
+            if (core.nextStep !== undefined && core.nextStep !== '') lines.push(`- ${t('detail.nextStep')}: ${core.nextStep}`)
+            if ((core.symptom === undefined || core.symptom === '') && (core.nextStep === undefined || core.nextStep === '')) {
+              lines.push(`- ${t('seed.briefMissing')}`)
+            }
+          }
           const files = detail.touchedFiles ?? []
           if (files.length > 0) lines.push(`- ${t('seed.files')}: ${files.join(', ')}`)
           const mustRead = detail.mustRead ?? []
@@ -1333,6 +1393,7 @@ Keep in mind
             if (fileSources.length > 8) lines.push(`  - …+${fileSources.length - 8}`)
           }
           lines.push(`- ${t('seed.check')}`)
+          lines.push(`- ${t('seed.noHistory')}`)
           lines.push(fill2(t('seed.hint'), { id: detail.id }))
           return lines.join('\n')
         }
