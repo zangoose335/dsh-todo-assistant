@@ -12,6 +12,7 @@
  */
 import { BRIEF_BASES } from './brief.js'
 import { confirmTestEvidence } from './evidence.js'
+import { affectedPhaseIds, diffIsEmpty, diffPlans } from './plan-diff.js'
 import { importPreviewToProjectInput, parsePlanMarkdown, renderPlanMarkdown } from './plan-markdown.js'
 import {
   CHANGE_KINDS,
@@ -197,6 +198,38 @@ function requireProject(value) {
 function requireProposal(value) {
   if (value === undefined) throw new TodoInputError('plan/not-found', '提议不存在，可能已被删除')
   return value
+}
+
+/** Resolve one phase reference (pid, display number, or `Phase 4a`). */
+function phaseByRef(project, ref) {
+  const wanted = String(ref ?? '')
+    .replace(/^#/u, '')
+    .replace(/^(?:Phase|阶段)\s*/iu, '')
+    .trim()
+  if (wanted === '') throw new TodoInputError('plan/phase-id-required', 'phaseId 不能为空')
+  const phase = (project.phases ?? []).find(
+    (entry) => entry.pid === wanted || entry.number.toLowerCase() === wanted.toLowerCase(),
+  )
+  if (phase === undefined) {
+    throw new TodoInputError('plan/phase-not-found', `阶段 ${wanted} 不存在`)
+  }
+  return phase
+}
+
+/** Resolve a list of phase references to pids, de-duplicated. */
+function phaseIdsFrom(project, value) {
+  if (!Array.isArray(value)) throw new TodoInputError('plan/invalid-dependencies', 'dependsOn 必须是编号数组')
+  return [...new Set(value.map((ref) => phaseByRef(project, ref).pid))]
+}
+
+/** Convert string (or evidence-shaped) items into stored evidence refs. */
+function evidenceFromTexts(value, label) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new TodoInputError('plan/invalid-evidence', `${label} 必须是数组`)
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : typeof item?.text === 'string' ? item.text.trim() : ''))
+    .filter((text) => text !== '')
+    .map((text) => ({ label, text, basis: 'decided' }))
 }
 
 /** Resolve `{ id }` to a stored project id. */
@@ -777,11 +810,12 @@ export function createStore(domain, options = {}) {
     },
 
     /**
-     * Record one pending proposal. `project-patch` is dry-run against the current
-     * project; `phase-result` validates the phase, result and optional target
-     * status. The project itself is never touched here.
+     * Record one pending proposal. Every kind is dry-run against the current
+     * project first, so a proposal that could never apply is never stored and
+     * the project itself is untouched. The host also computes the structured
+     * diff and affected phases here (PLAN.md §C2).
      *
-     * @param input - `{ projectId, baseVersion, kind?, patch?, phaseId?, result?, status?, reason?, proposedBySession? }`.
+     * @param input - `{ projectId, baseVersion, kind?, ...payload, reason?, proposedBySession? }`.
      * @param at - write timestamp.
      * @returns the stored proposal.
      */
@@ -790,6 +824,12 @@ export function createStore(domain, options = {}) {
       const project = requireProject(projectsTable.get(projectId))
       if (!Number.isInteger(input?.baseVersion) || input.baseVersion < 1) {
         throw new TodoInputError('plan/base-version-required', 'baseVersion 必须是正整数（先读 plan/detail 或 todo_plan_read）')
+      }
+      if (input.baseVersion !== project.version) {
+        throw new TodoInputError(
+          'plan/stale',
+          `提议基于第 ${input.baseVersion} 版，计划已是第 ${project.version} 版；先重新读取再提议`,
+        )
       }
       const kind = input?.kind === undefined ? 'project-patch' : input.kind
       if (!PROPOSAL_KINDS.includes(kind)) {
@@ -806,14 +846,15 @@ export function createStore(domain, options = {}) {
         status: 'pending',
         createdAt: at,
       }
+      let next = project
+
       if (kind === 'project-patch') {
         if (input?.patch === null || input.patch === undefined || typeof input.patch !== 'object' || Array.isArray(input.patch)) {
           throw new TodoInputError('plan/invalid-patch', 'project-patch 提议必须带 patch')
         }
-        // Validates the patch against the current project without writing anything.
-        applyProjectPatch(project, input.patch, at, { limits })
+        next = applyProjectPatch(project, input.patch, at, { limits })
         proposal.patch = { ...input.patch }
-      } else {
+      } else if (kind === 'phase-result') {
         const phaseId = typeof input?.phaseId === 'string' ? input.phaseId.trim() : ''
         if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'phase-result 提议必须带 phaseId')
         const phase = (project.phases ?? []).find((entry) => entry.pid === phaseId)
@@ -832,7 +873,99 @@ export function createStore(domain, options = {}) {
           }
           proposal.suggestedStatus = input.status
         }
+        const nextPhases = (project.phases ?? []).map((entry) =>
+          entry.pid === phaseId
+            ? {
+                ...entry,
+                result: proposal.result,
+                ...(proposal.suggestedStatus === undefined ? {} : { status: proposal.suggestedStatus }),
+                updatedAt: at,
+              }
+            : entry,
+        )
+        next = applyProjectPatch(project, { phases: nextPhases }, at, { limits })
+      } else if (kind === 'phase-add') {
+        const number = String(input?.number ?? '').trim()
+        const title = String(input?.title ?? '').trim()
+        if (number === '') throw new TodoInputError('plan/phase-number-required', '新增阶段必须给 number')
+        if (title === '') throw new TodoInputError('plan/invalid-phase', '新增阶段必须给 title')
+        let parentPid
+        if (input?.parentNumber !== undefined && input.parentNumber !== null && String(input.parentNumber).trim() !== '') {
+          parentPid = phaseByRef(project, input.parentNumber).pid
+        } else if (typeof input?.parentPid === 'string' && input.parentPid.trim() !== '') {
+          parentPid = phaseByRef(project, input.parentPid).pid
+        }
+        const pid = mintPlanId('ph', (id) => (project.phases ?? []).some((entry) => entry.pid === id))
+        const phaseInput = {
+          pid,
+          number,
+          title,
+          goal: typeof input?.goal === 'string' ? input.goal : '',
+          nextStep: typeof input?.nextStep === 'string' ? input.nextStep : '',
+          ...(parentPid === undefined ? {} : { parentPid }),
+          dependsOn: input?.dependsOn === undefined ? [] : phaseIdsFrom(project, input.dependsOn),
+          acceptance: evidenceFromTexts(input?.acceptance, 'acceptance') ?? [],
+          mustKeep: evidenceFromTexts(input?.mustKeep, 'context') ?? [],
+          decisions: evidenceFromTexts(input?.decisions, 'decision') ?? [],
+        }
+        const built = addPhaseToProject(project, phaseInput, at, {
+          phaseId: () => pid,
+          limits,
+        })
+        next = applyProjectPatch(project, built.patch, at, { limits })
+        proposal.payload = phaseInput
+      } else if (kind === 'phase-split') {
+        const phase = phaseByRef(project, input?.phaseId)
+        const children = Array.isArray(input?.children) ? input.children : []
+        if (children.length === 0) throw new TodoInputError('plan/split-children-required', '拆分提议至少需要一个子阶段')
+        const prepared = children.map((child) => {
+          const title = String(child?.title ?? '').trim()
+          if (title === '') throw new TodoInputError('plan/invalid-phase', '子阶段必须给 title')
+          const pid = mintPlanId('ph', (id) => (project.phases ?? []).some((entry) => entry.pid === id))
+          return {
+            pid,
+            title,
+            ...(child?.number === undefined || String(child.number).trim() === '' ? {} : { number: String(child.number).trim() }),
+            ...(typeof child?.goal === 'string' ? { goal: child.goal } : {}),
+          }
+        })
+        const built = splitPhaseInProject(project, phase.pid, prepared, at, {
+          phaseId: () => prepared[0].pid,
+          limits,
+        })
+        next = applyProjectPatch(project, built.patch, at, { limits })
+        const beforePids = new Set((project.phases ?? []).map((entry) => entry.pid))
+        const added = (next.phases ?? [])
+          .filter((entry) => entry.parentPid === phase.pid && !beforePids.has(entry.pid))
+          .map((entry) => ({ pid: entry.pid, number: entry.number, title: entry.title, goal: entry.goal }))
+        proposal.payload = { phaseId: phase.pid, children: added }
+      } else if (kind === 'dependency') {
+        const phase = phaseByRef(project, input?.phaseId)
+        if (!Array.isArray(input?.dependsOn)) {
+          throw new TodoInputError('plan/invalid-dependencies', 'dependency 提议必须带 dependsOn 编号数组')
+        }
+        const dependsOn = phaseIdsFrom(project, input.dependsOn)
+        const built = updatePhaseInProject(project, phase.pid, { dependsOn }, at, { limits })
+        next = applyProjectPatch(project, built.patch, at, { limits })
+        proposal.payload = { phaseId: phase.pid, dependsOn }
+      } else if (kind === 'acceptance') {
+        const phase = phaseByRef(project, input?.phaseId)
+        const patch = {}
+        if (input?.acceptance !== undefined) patch.acceptance = evidenceFromTexts(input.acceptance, 'acceptance')
+        if (input?.mustKeep !== undefined) patch.mustKeep = evidenceFromTexts(input.mustKeep, 'context')
+        if (input?.decisions !== undefined) patch.decisions = evidenceFromTexts(input.decisions, 'decision')
+        if (Object.keys(patch).length === 0) {
+          throw new TodoInputError('plan/no-change', 'acceptance 提议至少要改 acceptance/mustKeep/decisions 之一')
+        }
+        const built = updatePhaseInProject(project, phase.pid, patch, at, { limits })
+        next = applyProjectPatch(project, built.patch, at, { limits })
+        proposal.payload = { phaseId: phase.pid, ...patch }
       }
+
+      const diff = diffPlans(project, next)
+      if (diffIsEmpty(diff)) throw new TodoInputError('plan/no-change', '提议没有改变计划：先确认要改什么')
+      proposal.diff = diff
+      proposal.affectedPhaseIds = affectedPhaseIds(project, next, diff)
       if (store.proposalCount(projectId) >= limits.proposals) {
         throw new TodoInputError('plan/proposal-limit', `提议已达上限 ${limits.proposals} 条`)
       }
@@ -866,51 +999,100 @@ export function createStore(domain, options = {}) {
           `提议基于版本 ${proposal.baseVersion}，计划已是 ${project.version}；请重新读取 plan/detail 后重新提议`,
         )
       }
-      if (proposal.kind !== 'phase-result') {
-        const { project: updated, change } = await store.applyChange(project.id, proposal.patch, {
-          at,
-          by: 'proposal',
-          baseVersion: proposal.baseVersion,
-          reason: proposal.reason,
-          sourceIds: [],
-        })
+      const appliedProposal = async (updated, change) => {
         const applied = { ...proposal, status: 'applied', appliedAt: at }
         await proposalsTable.put(id, applied)
         return { project: updated, change, proposal: applied }
       }
 
-      const phases = project.phases ?? []
-      const phase = phases.find((entry) => entry.pid === proposal.phaseId)
-      if (phase === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${proposal.phaseId} 不存在`)
-      const result = options.confirmTests === true ? confirmTestEvidence(proposal.result) : proposal.result
-      if (result === null || typeof result !== 'object') {
-        throw new TodoInputError('plan/invalid-result', '提议没有可应用的结果')
-      }
-      const nextPhases = phases.map((entry) => {
-        if (entry.pid !== proposal.phaseId) return entry
-        return {
-          ...entry,
-          result,
-          ...(proposal.suggestedStatus === undefined ? {} : { status: proposal.suggestedStatus }),
-          updatedAt: at,
+      if (proposal.kind === 'phase-result') {
+        const phases = project.phases ?? []
+        const phase = phases.find((entry) => entry.pid === proposal.phaseId)
+        if (phase === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${proposal.phaseId} 不存在`)
+        const result = options.confirmTests === true ? confirmTestEvidence(proposal.result) : proposal.result
+        if (result === null || typeof result !== 'object') {
+          throw new TodoInputError('plan/invalid-result', '提议没有可应用的结果')
         }
-      })
-      const { project: updated, change } = await store.applyChange(
-        project.id,
-        { phases: nextPhases },
-        {
+        const nextPhases = phases.map((entry) => {
+          if (entry.pid !== proposal.phaseId) return entry
+          return {
+            ...entry,
+            result,
+            ...(proposal.suggestedStatus === undefined ? {} : { status: proposal.suggestedStatus }),
+            updatedAt: at,
+          }
+        })
+        const { project: updated, change } = await store.applyChange(
+          project.id,
+          { phases: nextPhases },
+          {
+            at,
+            by: 'proposal',
+            baseVersion: proposal.baseVersion,
+            kind: 'phase-result',
+            affectedPhaseIds: proposal.affectedPhaseIds,
+            reason: proposal.reason,
+            sourceIds: [],
+          },
+        )
+        return appliedProposal(updated, change)
+      }
+
+      if (proposal.kind === 'project-patch') {
+        const { project: updated, change } = await store.applyChange(project.id, proposal.patch, {
           at,
           by: 'proposal',
           baseVersion: proposal.baseVersion,
-          kind: 'phase-result',
-          affectedPhaseIds: [proposal.phaseId],
+          affectedPhaseIds: proposal.affectedPhaseIds,
           reason: proposal.reason,
           sourceIds: [],
-        },
-      )
-      const applied = { ...proposal, status: 'applied', appliedAt: at }
-      await proposalsTable.put(id, applied)
-      return { project: updated, change, proposal: applied }
+        })
+        return appliedProposal(updated, change)
+      }
+
+      const payload = proposal.payload ?? {}
+      let built
+      let kind
+      if (proposal.kind === 'phase-add') {
+        built = addPhaseToProject(project, payload, at, { phaseId: () => payload.pid, limits })
+        kind = 'phase-add'
+      } else if (proposal.kind === 'phase-split') {
+        built = splitPhaseInProject(project, payload.phaseId, payload.children ?? [], at, {
+          phaseId: () => {
+            throw new TodoInputError('plan/phase-pid-required', '拆分提议缺少子阶段 pid')
+          },
+          limits,
+        })
+        kind = 'phase-split'
+      } else if (proposal.kind === 'dependency') {
+        built = updatePhaseInProject(project, payload.phaseId, { dependsOn: payload.dependsOn ?? [] }, at, { limits })
+        kind = 'phase-update'
+      } else if (proposal.kind === 'acceptance') {
+        built = updatePhaseInProject(
+          project,
+          payload.phaseId,
+          {
+            ...(payload.acceptance === undefined ? {} : { acceptance: payload.acceptance }),
+            ...(payload.mustKeep === undefined ? {} : { mustKeep: payload.mustKeep }),
+            ...(payload.decisions === undefined ? {} : { decisions: payload.decisions }),
+          },
+          at,
+          { limits },
+        )
+        kind = 'phase-update'
+      } else {
+        throw new TodoInputError('plan/invalid-kind', `未知提议类型 ${proposal.kind}`)
+      }
+      const { project: updated, change } = await store.applyChange(project.id, built.patch, {
+        at,
+        by: 'proposal',
+        baseVersion: proposal.baseVersion,
+        kind,
+        affectedPhaseIds: proposal.affectedPhaseIds,
+        reason: proposal.reason,
+        sourceIds: [],
+      })
+      return appliedProposal(updated, change)
     },
 
     /**

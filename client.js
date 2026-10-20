@@ -339,6 +339,22 @@ window.__ModuleLoader__.load({
       'plan.proposals.suggestStatus': '建议状态',
       'plan.proposals.baseVersion': '基于第 {n} 版',
       'plan.proposals.evidence': '证据级别',
+      'plan.kind.phase-result': '阶段结果',
+      'plan.kind.project-patch': '项目字段',
+      'plan.kind.phase-add': '新增阶段',
+      'plan.kind.phase-split': '拆分阶段',
+      'plan.kind.dependency': '改依赖',
+      'plan.kind.acceptance': '改验收',
+      'plan.diff.project': '项目',
+      'plan.diff.added': '新增',
+      'plan.diff.removed': '删除',
+      'plan.diff.modified': '修改',
+      'plan.diff.deps': '依赖',
+      'plan.diff.affected': '受影响阶段',
+      'plan.diff.none': '没有可见变化',
+      'plan.diff.stale': '提议基于旧版本，计划已经变了；请重新读取后再提议。',
+      'plan.parent': '父阶段',
+      'plan.resultField': '结果',
       'plan.completed': '已完成',
       'plan.files': '文件',
       'plan.phaseResult': '结果：{summary}',
@@ -628,6 +644,22 @@ Keep in mind
       'plan.proposals.suggestStatus': 'Suggested status',
       'plan.proposals.baseVersion': 'based on v{n}',
       'plan.proposals.evidence': 'Evidence',
+      'plan.kind.phase-result': 'Phase result',
+      'plan.kind.project-patch': 'Project fields',
+      'plan.kind.phase-add': 'Add phase',
+      'plan.kind.phase-split': 'Split phase',
+      'plan.kind.dependency': 'Dependencies',
+      'plan.kind.acceptance': 'Acceptance',
+      'plan.diff.project': 'Project',
+      'plan.diff.added': 'Added',
+      'plan.diff.removed': 'Removed',
+      'plan.diff.modified': 'Modified',
+      'plan.diff.deps': 'Dependencies',
+      'plan.diff.affected': 'Affected phases',
+      'plan.diff.none': 'No visible change',
+      'plan.diff.stale': 'This proposal is based on an older version; re-read the plan and propose again.',
+      'plan.parent': 'Parent',
+      'plan.resultField': 'Result',
       'plan.completed': 'Completed',
       'plan.files': 'Files',
       'plan.phaseResult': 'Result: {summary}',
@@ -4013,16 +4045,95 @@ Keep in mind
         }
 
         function renderProposal(proposal, project) {
+          const stale = proposal.baseVersion !== project.version
           const actions = h(
             'div',
             { className: 'tplan-row' },
-            h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) }, t('plan.apply')),
+            h(
+              'button',
+              { type: 'button', className: 'tplan-action', disabled: busy || stale, onClick: () => applyProposal(proposal) },
+              t('plan.apply'),
+            ),
             h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) }, t('plan.reject')),
           )
-          if (proposal.kind !== 'phase-result') {
-            return h('div', { key: proposal.id, className: 'tplan-listline' }, `${proposal.kind} · ${proposal.reason || ''}`, actions)
+          const fieldLabel = (field) =>
+            ({
+              name: t('plan.name'),
+              goal: t('plan.goal'),
+              status: t('plan.status'),
+              currentPhaseId: t('plan.current'),
+              number: t('plan.number'),
+              title: t('plan.title'),
+              parentPid: t('plan.parent'),
+              nextStep: t('plan.next'),
+              result: t('plan.resultField'),
+            })[field] ?? field
+          const diffLines = []
+          const diff = proposal.diff ?? {}
+          for (const entry of diff.project ?? []) {
+            diffLines.push(`${t('plan.diff.project')} ${fieldLabel(entry.field)}: ${entry.before ?? t('plan.none')} → ${entry.after ?? t('plan.none')}`)
           }
-          const phase = (project.phases ?? []).find((entry) => entry.pid === proposal.phaseId)
+          for (const item of diff.phases?.added ?? []) diffLines.push(`+ ${item.number} ${item.title}`)
+          for (const item of diff.phases?.removed ?? []) diffLines.push(`- ${item.number} ${item.title}`)
+          for (const item of diff.phases?.modified ?? []) {
+            diffLines.push(
+              `~ ${item.number} ${item.title}: ${item.fields
+                .map((field) => `${fieldLabel(field.field)} ${field.before ?? t('plan.none')} → ${field.after ?? t('plan.none')}`)
+                .join('; ')}`,
+            )
+          }
+          for (const item of diff.dependencies ?? []) {
+            const parts = []
+            if ((item.added ?? []).length > 0) parts.push(`+${item.added.join(', ')}`)
+            if ((item.removed ?? []).length > 0) parts.push(`-${item.removed.join(', ')}`)
+            diffLines.push(`${t('plan.diff.deps')} ${item.number}: ${parts.join(' ')}`)
+          }
+          for (const item of diff.acceptance ?? []) {
+            const parts = []
+            if ((item.added ?? []).length > 0) parts.push(`+${item.added.join('; ')}`)
+            if ((item.removed ?? []).length > 0) parts.push(`-${item.removed.join('; ')}`)
+            const label =
+              item.field === 'acceptance' ? t('plan.acceptance') : item.field === 'mustKeep' ? t('plan.mustKeep') : t('plan.decisions')
+            diffLines.push(`${label} ${item.number}: ${parts.join(' ')}`)
+          }
+          for (const field of ['decisions', 'risks']) {
+            const delta = diff[field] ?? {}
+            if ((delta.added ?? []).length === 0 && (delta.removed ?? []).length === 0) continue
+            const label = field === 'decisions' ? t('plan.decisions') : t('plan.risks')
+            diffLines.push(`${label}: +${(delta.added ?? []).join('; ')} -${(delta.removed ?? []).join('; ')}`)
+          }
+          if ((diff.sources?.added ?? []).length > 0 || (diff.sources?.removed ?? []).length > 0) {
+            diffLines.push(`${t('plan.sources')}: +${(diff.sources.added ?? []).join('; ')} -${(diff.sources.removed ?? []).join('; ')}`)
+          }
+          const byPid = new Map((project.phases ?? []).map((entry) => [entry.pid, entry]))
+          const affected = (proposal.affectedPhaseIds ?? [])
+            .map((pid) => byPid.get(pid))
+            .filter((entry) => entry !== undefined)
+            .map((entry) => `${entry.number} ${entry.title}`)
+          const target = proposal.phaseId === undefined ? undefined : byPid.get(proposal.phaseId)
+          const base = h(
+            'div',
+            { className: 'tplan-hint' },
+            `${t('plan.diff.affected')}: ${affected.length === 0 ? t('plan.none') : affected.join('; ')} · ${fill2(t('plan.proposals.baseVersion'), { n: proposal.baseVersion })}`,
+          )
+          if (proposal.kind !== 'phase-result') {
+            return h(
+              'div',
+              { key: proposal.id, className: 'tplan-preview' },
+              h(
+                'div',
+                { className: 'tplan-sec-head' },
+                `${t(`plan.kind.${proposal.kind}`) ?? proposal.kind}${target === undefined ? '' : ` · ${target.number} ${target.title}`}`,
+              ),
+              ...(diffLines.length === 0
+                ? [h('div', { className: 'tplan-listline' }, t('plan.diff.none'))]
+                : diffLines.map((line, index) => h('div', { key: `diff-${index}`, className: 'tplan-listline' }, `- ${line}`))),
+              base,
+              stale ? h('div', { className: 'tplan-err' }, t('plan.diff.stale')) : null,
+              proposal.reason === '' || proposal.reason === undefined ? null : h('div', { className: 'tplan-hint' }, proposal.reason),
+              actions,
+            )
+          }
           const result = proposal.result ?? {}
           const tests = Array.isArray(result.tests) ? result.tests : []
           const verification = result.verification ?? 'claimed'
@@ -4034,7 +4145,7 @@ Keep in mind
             h(
               'div',
               { className: 'tplan-sec-head' },
-              `${t('plan.proposals.resultTitle')}${phase === undefined ? '' : ` · ${phase.number} ${phase.title}`}`,
+              `${t('plan.proposals.resultTitle')}${target === undefined ? '' : ` · ${target.number} ${target.title}`}`,
             ),
             h('div', { className: 'tplan-goal' }, result.summary || ''),
             completed.length === 0 ? null : h('div', { className: 'tplan-listline' }, `${t('plan.completed')}: ${completed.join('；')}`),
@@ -4065,8 +4176,9 @@ Keep in mind
               proposal.suggestedStatus === undefined || proposal.suggestedStatus === null
                 ? ''
                 : ` · ${t('plan.proposals.suggestStatus')}: ${statusText(t, proposal.suggestedStatus, PLAN_STATUS_LABEL)}`,
-              ` · ${fill2(t('plan.proposals.baseVersion'), { n: proposal.baseVersion })}`,
             ),
+            base,
+            stale ? h('div', { className: 'tplan-err' }, t('plan.diff.stale')) : null,
             proposal.reason === '' || proposal.reason === undefined
               ? null
               : h('div', { className: 'tplan-hint' }, proposal.reason),

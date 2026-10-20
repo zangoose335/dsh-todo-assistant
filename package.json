@@ -32,6 +32,7 @@
     "domain.js",
     "brief.js",
     "evidence.js",
+    "plan-diff.js",
     "plan-markdown.js",
     "plan-export.js",
     "api.js",

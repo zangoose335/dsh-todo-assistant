@@ -71,7 +71,14 @@ export const PROPOSAL_STATUSES = ['pending', 'applied', 'rejected']
  * Proposal kinds B1 accepts. B2/C2 add `phase-add`, `phase-split`,
  * `dependency`, `acceptance`, … — stored proposals keep their recorded kind.
  */
-export const PROPOSAL_KINDS = ['project-patch', 'phase-result']
+export const PROPOSAL_KINDS = [
+  'project-patch',
+  'phase-result',
+  'phase-add',
+  'phase-split',
+  'dependency',
+  'acceptance',
+]
 
 /**
  * Change kinds recorded in `plan_changes`. B2 adds the phase write operations;
@@ -322,6 +329,12 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     result: phaseResult.optional(),
     /** A suggested phase status; the proposal's own lifecycle stays `status`. */
     suggestedStatus: z.enum(PHASE_STATUSES).optional(),
+    /** `phase-add` / `phase-split` / `dependency` / `acceptance` payload. */
+    payload: z.unknown().optional(),
+    /** Host-computed structured diff (PLAN.md §C2). */
+    diff: z.unknown().optional(),
+    /** Phases the host considers affected by this proposal. */
+    affectedPhaseIds: z.array(z.string()).default([]),
     reason: z.string().default(''),
     proposedBySession: z.string().default(''),
     status: z.enum(PROPOSAL_STATUSES).default('pending'),

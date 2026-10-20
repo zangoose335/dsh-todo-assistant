@@ -921,6 +921,7 @@ export function createTodoPlanReadTool({ defineTool, store, resolveWorkspace }) 
           projects: { type: 'json' },
           project: { type: 'json' },
           phase: { type: 'json' },
+          parentNumber: { type: 'string' },
           dependencies: { type: 'json' },
           currentPhase: { type: 'json' },
         },
@@ -942,7 +943,7 @@ export function createTodoPlanReadTool({ defineTool, store, resolveWorkspace }) 
           const lines = [`plan ${value.project?.id ?? ''}「${value.project?.name ?? ''}」 · phase ${phase.number} ${phase.title} [${phase.status}]`]
           if (phase.goal) lines.push(`goal: ${phase.goal}`)
           if (phase.nextStep) lines.push(`next: ${phase.nextStep}`)
-          if (phase.parentPid !== undefined) lines.push(`parent: ${phase.parentPid}`)
+          if (value.parentNumber !== undefined) lines.push(`parent: ${value.parentNumber}`)
           const dependencies = value.dependencies ?? []
           lines.push(
             dependencies.length === 0
@@ -967,9 +968,14 @@ export function createTodoPlanReadTool({ defineTool, store, resolveWorkspace }) 
         if (project.currentPhase !== null && project.currentPhase !== undefined) {
           lines.push(`current: ${project.currentPhase.number} ${project.currentPhase.title} [${project.currentPhase.status}]`)
         }
+        const readByPid = new Map((project.phases ?? []).map((phase) => [phase.pid, phase]))
         for (const phase of project.phases ?? []) {
-          const deps = (phase.dependsOn ?? []).length === 0 ? '' : ` ← ${phase.dependsOn.join(', ')}`
-          const parent = phase.parentPid === undefined ? '' : ` (parent ${phase.parentPid})`
+          const deps =
+            (phase.dependsOn ?? []).length === 0
+              ? ''
+              : ` ← ${(phase.dependsOn ?? []).map((pid) => readByPid.get(pid)?.number ?? pid).join(', ')}`
+          const parent =
+            phase.parentPid === undefined ? '' : ` (parent ${readByPid.get(phase.parentPid)?.number ?? phase.parentPid})`
           lines.push(`- ${phase.number} ${phase.title} [${phase.status}]${deps}${parent} · 验收 ${(phase.acceptance ?? []).length}`)
           if (phase.result !== undefined) lines.push(`  result [${phase.result.verification}]: ${truncate(phase.result.summary, 160)}`)
         }
@@ -1018,6 +1024,9 @@ export function createTodoPlanReadTool({ defineTool, store, resolveWorkspace }) 
           currentPhaseId: project.currentPhaseId ?? null,
         },
         phase,
+        ...(phase.parentPid === undefined
+          ? {}
+          : { parentNumber: project.phases.find((entry) => entry.pid === phase.parentPid)?.number ?? phase.parentPid }),
         dependencies,
         currentPhase: project.currentPhase,
       }
@@ -1090,22 +1099,63 @@ export function createTodoPlanContextTool({ defineTool, store }) {
  * @returns the `todo_plan_propose` definition.
  */
 export function createTodoPlanProposeTool({ defineTool, store, now = Date.now }) {
+  const formatDiff = (diff) => {
+    const lines = []
+    for (const entry of diff?.project ?? []) {
+      lines.push(`Project ${entry.field}: ${entry.before ?? '(none)'} → ${entry.after ?? '(none)'}`)
+    }
+    for (const phase of diff?.phases?.added ?? []) lines.push(`+ phase ${phase.number} ${phase.title}`)
+    for (const phase of diff?.phases?.removed ?? []) lines.push(`- phase ${phase.number} ${phase.title}`)
+    for (const phase of diff?.phases?.modified ?? []) {
+      lines.push(`~ phase ${phase.number} ${phase.title}: ${phase.fields.map((field) => `${field.field} ${field.before ?? '(none)'} → ${field.after ?? '(none)'}`).join('; ')}`)
+    }
+    for (const entry of diff?.dependencies ?? []) {
+      const parts = []
+      if ((entry.added ?? []).length > 0) parts.push(`+${entry.added.join(',')}`)
+      if ((entry.removed ?? []).length > 0) parts.push(`-${entry.removed.join(',')}`)
+      lines.push(`Dependencies ${entry.number} ${entry.title}: ${parts.join(' ')}`)
+    }
+    for (const entry of diff?.acceptance ?? []) {
+      const parts = []
+      if ((entry.added ?? []).length > 0) parts.push(`+${entry.added.join('; ')}`)
+      if ((entry.removed ?? []).length > 0) parts.push(`-${entry.removed.join('; ')}`)
+      lines.push(`${entry.field} ${entry.number} ${entry.title}: ${parts.join(' ')}`)
+    }
+    for (const field of ['decisions', 'risks']) {
+      const delta = diff?.[field] ?? {}
+      if ((delta.added ?? []).length > 0 || (delta.removed ?? []).length > 0) {
+        lines.push(`${field}: +${(delta.added ?? []).join('; ')} -${(delta.removed ?? []).join('; ')}`)
+      }
+    }
+    if ((diff?.sources?.added ?? []).length > 0 || (diff?.sources?.removed ?? []).length > 0) {
+      lines.push(`sources: +${(diff.sources.added ?? []).join('; ')} -${(diff.sources.removed ?? []).join('; ')}`)
+    }
+    return lines.length === 0 ? ['(no visible change)'] : lines
+  }
+
   return defineTool({
     name: 'todo_plan_propose',
     description: [
-      'Propose a phase result for a project plan: what was actually done, files, test commands and outcomes, issues, risks, changed decisions, and an optional suggested status.',
-      'It only records a proposal. It never changes the plan or marks a phase done; show the result and the per-test evidence level to the developer and let them apply or reject it in the Plan page.',
-      'Do not claim completion on your own. Test commands you report are checked against tools this session actually ran; only real tool results count as evidence, everything else stays an AI claim.',
+      'Propose one plan change: a phase result (kind=phase-result), a new phase, a phase split, dependency changes, or acceptance/decision changes.',
+      'It only records a proposal. It never changes the plan; the host computes the structured diff and the affected phases, and you must show them to the developer. Only the developer can apply or reject it in the Plan page.',
+      'For a phase result, test commands you report are checked against tools this session actually ran; only real tool results count as evidence, everything else stays an AI claim. Do not claim completion on your own.',
     ].join(' '),
     parameters: {
       projectId: { type: 'string', required: true, description: 'Project id (pj_…).' },
-      phaseId: { type: 'string', required: true, description: 'Phase pid (ph_…) the result belongs to.' },
       baseVersion: { type: 'integer', required: true, description: 'The project version you read; a stale version is rejected.' },
+      kind: {
+        type: 'string',
+        enum: ['phase-result', 'phase-add', 'phase-split', 'dependency', 'acceptance'],
+        description: 'What to propose. Defaults to phase-result.',
+      },
+      phaseId: {
+        type: 'string',
+        description: 'Target phase pid (ph_…); required for phase-result, phase-split, dependency and acceptance.',
+      },
       result: {
         type: 'object',
-        required: true,
         additionalProperties: false,
-        description: 'The phase result. Keep it structured; do not paste conversation text.',
+        description: 'phase-result only. The phase result; test claims are checked against real tool results.',
         properties: {
           summary: { type: 'string', required: true, description: 'What was actually done, in one short paragraph.' },
           completed: { type: 'array', items: { type: 'string' }, description: 'Completed items.' },
@@ -1132,9 +1182,50 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
       status: {
         type: 'string',
         enum: ['pending', 'active', 'blocked', 'done', 'dropped'],
-        description: 'Optional suggested phase status; it only takes effect if the developer applies the proposal.',
+        description: 'phase-result only: an optional suggested phase status; it only takes effect if the developer applies.',
       },
-      reason: { type: 'string', description: 'Why this result is proposed now.' },
+      parentNumber: {
+        type: 'string',
+        description: 'phase-add only: parent display number (omit for a root phase).',
+      },
+      number: { type: 'string', description: 'phase-add only: display number for the new phase.' },
+      title: { type: 'string', description: 'phase-add only: display title for the new phase.' },
+      goal: { type: 'string', description: 'phase-add only: goal of the new phase.' },
+      nextStep: { type: 'string', description: 'phase-add only: next step of the new phase.' },
+      dependsOn: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'phase-add / dependency: phase numbers (or pids) the target should depend on.',
+      },
+      acceptance: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'phase-add / acceptance: acceptance items (replaces the current list).',
+      },
+      mustKeep: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'phase-add / acceptance: must-keep context items (replaces the current list).',
+      },
+      decisions: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'phase-add / acceptance: phase decision items (replaces the current list).',
+      },
+      children: {
+        type: 'array',
+        description: 'phase-split only: child phases.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string', required: true },
+            number: { type: 'string' },
+            goal: { type: 'string' },
+          },
+        },
+      },
+      reason: { type: 'string', description: 'Why this change is proposed now.' },
     },
     output: {
       schema: {
@@ -1144,8 +1235,9 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
           shape: { type: 'string', required: true, enum: ['proposal'] },
           proposalId: { type: 'string', required: true },
           projectId: { type: 'string', required: true },
-          phaseId: { type: 'string', required: true },
+          kind: { type: 'string', required: true },
           projectName: { type: 'string' },
+          phaseId: { type: 'string' },
           phaseNumber: { type: 'string' },
           phaseTitle: { type: 'string' },
           baseVersion: { type: 'integer' },
@@ -1155,22 +1247,36 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
           reason: { type: 'string' },
           result: { type: 'json' },
           tests: { type: 'json' },
+          diff: { type: 'json' },
+          affectedPhaseIds: { type: 'json' },
+          affected: { type: 'json' },
         },
       },
       render: (_args, value) => {
-        const lines = [
-          `Proposal ${value.proposalId} for ${value.projectName ?? value.projectId} · phase ${value.phaseNumber ?? ''} ${value.phaseTitle ?? ''}`,
-          `Evidence: ${value.verification ?? 'claimed'}${value.suggestedStatus === undefined || value.suggestedStatus === '' ? '' : ` · suggested status: ${value.suggestedStatus}`}`,
-          `Result: ${value.result?.summary ?? ''}`,
-        ]
-        const tests = Array.isArray(value.tests) ? value.tests : []
-        if (tests.length === 0) lines.push('Tests: (none reported)')
-        else {
-          lines.push('Tests:')
-          for (const test of tests) {
-            lines.push(`- ${test.command || '(command not recorded)'} — ${test.status} (${test.verification})`)
+        const phaseLabel =
+          value.phaseNumber === undefined
+            ? ''
+            : ` · phase ${value.phaseNumber} ${value.phaseTitle ?? ''}`
+        const lines = [`Proposal ${value.proposalId} (${value.kind}) for ${value.projectName ?? value.projectId}${phaseLabel}`]
+        if (value.kind === 'phase-result') {
+          lines.push(`Evidence: ${value.verification ?? 'claimed'}${value.suggestedStatus === undefined || value.suggestedStatus === '' ? '' : ` · suggested status: ${value.suggestedStatus}`}`)
+          lines.push(`Result: ${value.result?.summary ?? ''}`)
+          const tests = Array.isArray(value.tests) ? value.tests : []
+          if (tests.length === 0) lines.push('Tests: (none reported)')
+          else {
+            lines.push('Tests:')
+            for (const test of tests) lines.push(`- ${test.command || '(command not recorded)'} — ${test.status} (${test.verification})`)
           }
+        } else {
+          lines.push('Diff:')
+          for (const line of formatDiff(value.diff)) lines.push(`- ${line}`)
         }
+        const affected = Array.isArray(value.affected) ? value.affected : []
+        lines.push(
+          affected.length === 0
+            ? 'Affected phases: (none)'
+            : `Affected phases: ${affected.map((entry) => `${entry.number} ${entry.title}`).join('; ')}`,
+        )
         if (typeof value.reason === 'string' && value.reason !== '') lines.push(`Why: ${value.reason}`)
         lines.push('Nothing has changed yet. Ask the developer to apply or reject it in the Plan page.')
         return [{ type: 'text', text: lines.join('\n') }]
@@ -1179,8 +1285,6 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
     async execute(args, exec) {
       const projectId = typeof args?.projectId === 'string' ? args.projectId.trim() : ''
       if (projectId === '') throw new TodoInputError('plan/project-required', 'projectId 不能为空')
-      const phaseId = typeof args?.phaseId === 'string' ? args.phaseId.trim() : ''
-      if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'phaseId 不能为空')
       const record = store.findProject(projectId)
       if (record === undefined) {
         throw new TodoInputError('plan/not-found', `no project ${projectId} (pass the pj_ id)`)
@@ -1195,58 +1299,96 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
           `计划已是第 ${project.version} 版（你读的是第 ${args.baseVersion} 版）；先重新读取 todo_plan_read 再提议`,
         )
       }
-      const phase = (project.phases ?? []).find((entry) => entry.pid === phaseId)
-      if (phase === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${phaseId} 不存在`)
+      const kind = typeof args?.kind === 'string' && args.kind !== '' ? args.kind : 'phase-result'
+      const phaseId = typeof args?.phaseId === 'string' ? args.phaseId.trim() : ''
       const at = now()
-      const claimed = normalizePhaseResultInput(args?.result, at)
-      // An AI claim is never evidence: force its own tests to ai-claim before
-      // matching them against what the session actually ran.
-      const sanitized = {
-        ...claimed,
-        tests: claimed.tests.map((test) => ({ ...test, verification: 'ai-claim' })),
-        verification: 'claimed',
+      const input = {
+        projectId: record.id,
+        baseVersion: args.baseVersion,
+        kind,
+        reason: typeof args?.reason === 'string' ? args.reason : '',
+        proposedBySession:
+          typeof exec?.agent?.session?.id === 'string'
+            ? exec.agent.session.id
+            : typeof exec?.agent?.id === 'string'
+              ? exec.agent.id
+              : '',
       }
-      const events = typeof exec?.agent?.session?.snapshotEvents === 'function' ? exec.agent.session.snapshotEvents() : []
-      const observed = collectTestEvidence(events)
-      const lastUserSeq = events.reduce(
-        (max, event) => (event?.type === 'user/message' && Number.isInteger(event.seq) && event.seq > max ? event.seq : max),
-        0,
-      )
-      const appended = collectTestEvidence(events.filter((event) => Number.isInteger(event?.seq) && event.seq > lastUserSeq))
-      const merged = mergeResultEvidence(sanitized, observed, { at, append: appended })
-      const proposal = await store.addProposal(
-        {
-          projectId: record.id,
-          baseVersion: args.baseVersion,
-          kind: 'phase-result',
-          phaseId,
-          result: merged,
-          ...(typeof args?.status === 'string' && args.status !== '' ? { status: args.status } : {}),
-          reason: typeof args?.reason === 'string' ? args.reason : '',
-          proposedBySession:
-            typeof exec?.agent?.session?.id === 'string'
-              ? exec.agent.session.id
-              : typeof exec?.agent?.id === 'string'
-                ? exec.agent.id
-                : '',
-        },
-        at,
-      )
+      if (kind === 'phase-result') {
+        if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'phase-result 提议必须带 phaseId')
+        const claimed = normalizePhaseResultInput(args?.result, at)
+        // An AI claim is never evidence: force its own tests to ai-claim before
+        // matching them against what the session actually ran.
+        const sanitized = {
+          ...claimed,
+          tests: claimed.tests.map((test) => ({ ...test, verification: 'ai-claim' })),
+          verification: 'claimed',
+        }
+        const events = typeof exec?.agent?.session?.snapshotEvents === 'function' ? exec.agent.session.snapshotEvents() : []
+        const observed = collectTestEvidence(events)
+        const lastUserSeq = events.reduce(
+          (max, event) => (event?.type === 'user/message' && Number.isInteger(event.seq) && event.seq > max ? event.seq : max),
+          0,
+        )
+        const appended = collectTestEvidence(events.filter((event) => Number.isInteger(event?.seq) && event.seq > lastUserSeq))
+        input.phaseId = phaseId
+        input.result = mergeResultEvidence(sanitized, observed, { at, append: appended })
+        if (typeof args?.status === 'string' && args.status !== '') input.status = args.status
+      } else if (kind === 'phase-add') {
+        input.number = args?.number
+        input.title = args?.title
+        input.goal = args?.goal
+        input.nextStep = args?.nextStep
+        if (args?.parentNumber !== undefined) input.parentNumber = args.parentNumber
+        if (Array.isArray(args?.dependsOn)) input.dependsOn = args.dependsOn
+        if (Array.isArray(args?.acceptance)) input.acceptance = args.acceptance
+        if (Array.isArray(args?.mustKeep)) input.mustKeep = args.mustKeep
+        if (Array.isArray(args?.decisions)) input.decisions = args.decisions
+      } else if (kind === 'phase-split') {
+        if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'phase-split 提议必须带 phaseId')
+        input.phaseId = phaseId
+        input.children = Array.isArray(args?.children) ? args.children : []
+      } else if (kind === 'dependency') {
+        if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'dependency 提议必须带 phaseId')
+        input.phaseId = phaseId
+        input.dependsOn = Array.isArray(args?.dependsOn) ? args.dependsOn : []
+      } else if (kind === 'acceptance') {
+        if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'acceptance 提议必须带 phaseId')
+        input.phaseId = phaseId
+        if (Array.isArray(args?.acceptance)) input.acceptance = args.acceptance
+        if (Array.isArray(args?.mustKeep)) input.mustKeep = args.mustKeep
+        if (Array.isArray(args?.decisions)) input.decisions = args.decisions
+      } else {
+        throw new TodoInputError('plan/invalid-kind', `未知提议类型 ${kind}`)
+      }
+      const proposal = await store.addProposal(input, at)
+      const byPid = new Map((project.phases ?? []).map((phase) => [phase.pid, phase]))
+      const affected = (proposal.affectedPhaseIds ?? [])
+        .map((pid) => byPid.get(pid))
+        .filter((phase) => phase !== undefined)
+        .map((phase) => ({ pid: phase.pid, number: phase.number, title: phase.title, status: phase.status }))
+      const target = phaseId === '' ? undefined : byPid.get(phaseId)
       return {
         shape: 'proposal',
         proposalId: proposal.id,
         projectId: record.id,
-        phaseId,
+        kind: proposal.kind,
         projectName: project.name,
-        phaseNumber: phase.number,
-        phaseTitle: phase.title,
+        ...(target === undefined ? {} : { phaseId: target.pid, phaseNumber: target.number, phaseTitle: target.title }),
         baseVersion: proposal.baseVersion,
         currentVersion: project.version,
-        verification: proposal.result?.verification ?? 'claimed',
-        ...(proposal.suggestedStatus === undefined ? {} : { suggestedStatus: proposal.suggestedStatus }),
+        ...(kind === 'phase-result'
+          ? {
+              verification: proposal.result?.verification ?? 'claimed',
+              ...(proposal.suggestedStatus === undefined ? {} : { suggestedStatus: proposal.suggestedStatus }),
+              result: proposal.result,
+              tests: proposal.result?.tests ?? [],
+            }
+          : {}),
         reason: proposal.reason,
-        result: proposal.result,
-        tests: proposal.result?.tests ?? [],
+        diff: proposal.diff,
+        affectedPhaseIds: proposal.affectedPhaseIds,
+        affected,
       }
     },
   })

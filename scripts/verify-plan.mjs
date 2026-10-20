@@ -255,16 +255,22 @@ async function main() {
     )
     await expectCode('applying twice is rejected', api, 'plan.proposal.apply', { id: proposal.id }, 'plan/proposal-not-pending')
 
-    const stale = await store.addProposal({ projectId, baseVersion: 2, patch: { goal: 'stale goal' }, reason: 'stale' }, tick())
+    const stale = await store.addProposal({ projectId, baseVersion: 3, patch: { goal: 'stale goal' }, reason: 'stale' }, tick())
+    await call(api, 'plan.patch', { id: projectId, patch: { goal: 'changed after the proposal' } })
     await expectCode('a stale proposal is rejected', api, 'plan.proposal.apply', { id: stale.id }, 'plan/stale')
-    checkEqual('the stale rejection leaves the project alone', (await call(api, 'plan.detail', { id: projectId })).item.version, 3)
+    checkEqual('the stale rejection leaves the project alone', (await call(api, 'plan.detail', { id: projectId })).item.version, 4)
     const rejected = await call(api, 'plan.proposal.reject', { id: stale.id, reason: '版本过旧' })
     checkEqual('reject records the decision', [rejected.item.status, rejected.item.rejectedReason], ['rejected', '版本过旧'])
-    checkEqual('reject does not change the plan', (await call(api, 'plan.detail', { id: projectId })).item.version, 3)
+    checkEqual('reject does not change the plan', (await call(api, 'plan.detail', { id: projectId })).item.version, 4)
     await expectCode('rejecting twice is rejected', api, 'plan.proposal.reject', { id: stale.id }, 'plan/proposal-not-pending')
     await expectStoreCode(
+      'a stale proposal is rejected at propose time',
+      () => store.addProposal({ projectId, baseVersion: 3, patch: { goal: 'x' } }, tick()),
+      'plan/stale',
+    )
+    await expectStoreCode(
       'an unusable proposal patch is not stored',
-      () => store.addProposal({ projectId, baseVersion: 3, patch: { nope: 1 } }, tick()),
+      () => store.addProposal({ projectId, baseVersion: 4, patch: { nope: 1 } }, tick()),
       'plan/unknown-field',
     )
     checkEqual('the bad proposal left the proposal count alone', (await call(api, 'plan.proposal.list', { id: projectId })).total, 2)
@@ -354,10 +360,10 @@ async function main() {
 
     console.log('\nB1 §5 change list and export')
     const changes = await call(api, 'plan.change.list', { id: projectId })
-    checkEqual('changes are ordered by version', changes.items.map((change) => change.version), [1, 2, 3])
+    checkEqual('changes are ordered by version', changes.items.map((change) => change.version), [1, 2, 3, 4])
     checkEqual('the change list limit is honoured', (await call(api, 'plan.change.list', { id: projectId, limit: 2 })).items.length, 2)
     const snapshot = await call(api, 'plan.export', { id: projectId })
-    checkEqual('export carries the project and its whole history', [snapshot.project.id, snapshot.changes.length], [projectId, 3])
+    checkEqual('export carries the project and its whole history', [snapshot.project.id, snapshot.changes.length], [projectId, 4])
     checkEqual('export project is the full projection', [snapshot.project.phaseCount, snapshot.project.currentPhase !== null], [2, true])
     checkLossless('export is lossless JSON', snapshot)
 
@@ -415,7 +421,7 @@ async function main() {
     store = createStore(domain)
     api = createApi({ store, now: tick })
     const reopened = store.getProject(projectId)
-    checkEqual('a reopened project keeps its version and phases', [reopened?.version, reopened?.phases.length], [3, 2])
+    checkEqual('a reopened project keeps its version and phases', [reopened?.version, reopened?.phases.length], [4, 2])
     checkEqual(
       'a reopened plan keeps its proposal history',
       store.proposalsFor(projectId).map((entry) => entry.status),
@@ -423,7 +429,7 @@ async function main() {
     )
     checkEqual('reopened legacy cards are intact', [store.get('td_old01')?.title, store.get('td_old02')?.major], ['语言列表删除异常', 1])
     const reopenedList = await call(api, 'plan.list', { workspace: '/tmp/plan-ws' })
-    checkEqual('the reopened plan list is projected again', reopenedList.items.some((row) => row.id === projectId && row.version === 3), true)
+    checkEqual('the reopened plan list is projected again', reopenedList.items.some((row) => row.id === projectId && row.version === 4), true)
 
     console.log(`\n${checks - failures}/${checks} checks passed`)
   } finally {
