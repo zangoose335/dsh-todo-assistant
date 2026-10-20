@@ -194,6 +194,13 @@ sessions. It sits beside the card page and does not change it.
     context, decisions, sources, status and execution results. You can add,
     edit, split, remove (rejected while others depend on it or it has
     children), change status, record a result, and set the current phase.
+-   **Phase results and evidence**: the AI can only *propose* a result (what
+    was done, files, test commands and outcomes, issues); it cannot mark a phase
+    done. The plugin checks claimed tests against tools the session actually
+    ran: real runs become "tool result", unrun claims stay "AI claim", and
+    observed runs the AI omitted are appended. Nothing is written until you
+    press Apply in the Plan page; ticking "I checked these test results" marks
+    tests without tool evidence as "developer".
 -   **Phase handoff**: "Start phase" opens a new session whose opening text
     carries the project goal, the phase goal/next step, the actual results of
     its direct prerequisite phases, decisions, acceptance, risks, unresolved
@@ -281,22 +288,26 @@ See `docs/GATE1-T5-ACCEPTANCE.md`.
 
 **Scope limits:** the old-plugin UI and storage write-back were exercised on a copy/test workspace, not a destructive drill on the real `~/.dsh`; S9 needs an explicit pointer to #6.25; S2 has a duplicate constraint and S7 is slightly above minimal. The real UI ten scenarios, real `todo_recall`, old-plugin UI, storage copy, and scenario 10 are verified.
 
-**Stage 4 (B1–B5) evidence (2026-10-20):** `verify-plan` 73/73,
+**Stage 4 (B1–B5, C1) evidence (2026-10-20):** `verify-plan` 73/73,
 `verify-phase` 66/66, `verify-import` 67/67, `verify-context` 46/46,
-`verify-client` 12/12 — **753** checks in total together with the original five
-scripts, and `git diff --check` passes. The manual plan-page record is in
-[`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md).
+`verify-client` 12/12, `verify-evidence` 32/32 — **785** checks in total
+together with the original five scripts, and `git diff --check` passes. The
+manual plan-page record is in [`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md);
+the C1 propose/reject/apply flow was also walked by hand.
 
-Stage 4's B1–B5 are complete (2026-10-20): the Project Plan model and its three
-tables, phases/dependencies/acceptance/status/results, deterministic Markdown
-import with confirmation, the phase context pack and read-only tools, the Plan
-page (a second right-sidebar entry), and export into the workspace folder. The
+Stage 4's B1–B5 and C1 are complete (2026-10-20): the Project Plan model and
+its three tables, phases/dependencies/acceptance/status/results, deterministic
+Markdown import with confirmation, the phase context pack and read-only tools,
+the Plan page (a second right-sidebar entry), and export into the workspace
+folder. C1 adds the phase-result flow: the AI may only propose, only real tool
+results count as evidence, and nothing changes until the developer applies. The
 developer walked the Plan page through import, split, current phase, start
 phase, insert handoff and export by hand; the card page was not changed.
 
-Still **not implemented**: C1–C4 (evidence grading, diffs, proposals/confirm/
-history), D1–D3 (card/phase drag handoff), and E2–E4 (card steps and numbering).
-The Plan page has no "propose a change" or project deletion yet; a Markdown
+Still **not implemented**: C2–C4 (plan diffs/affected phases, project-level
+proposal/confirmation, version history), D1–D3 (card/phase drag handoff), and
+E2–E4 (card steps and numbering). The Plan page has no project-level "propose a
+change" or project deletion yet; phase-result proposals are available; a Markdown
 round-trip does not keep test-evidence details; an older version writes back
 without `brief`/`sources` and drops the `projects`/`plan_proposals`/
 `plan_changes` tables — back up `~/.dsh/storages/todo_assistant.json` before
@@ -357,6 +368,8 @@ see:
     and handoff
 -   [`scripts/verify-client.mjs`](scripts/verify-client.mjs): browser tab
     registration smoke test
+-   [`scripts/verify-evidence.mjs`](scripts/verify-evidence.mjs): test-evidence
+    pairing, proposals and apply
 -   [`scripts/fixtures/plan-a-e.md`](scripts/fixtures/plan-a-e.md): A–E roadmap
     import fixture
 

@@ -586,7 +586,7 @@ AI:  [todo_add: 只填本待办相关字段]
 | M5 | 新开会话 / 插入当前会话 | ✅ |
 | M6 | `todo_recall` 目录 + 分页回读 | 可砍 |
 | M7 | 去重合并 | 可砍 |
-| S4 | Project Plan（B1–B5）：计划/阶段/导入导出/上下文包/计划 tab | ✅ 已完成（2026-10-20） |
+| S4 | Project Plan（B1–B5）与阶段结果证据（C1）：计划/阶段/导入导出/上下文包/计划 tab/结果提议 | ✅ 已完成（2026-10-20） |
 
 M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真正省 token。
 
@@ -702,13 +702,13 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE2-REVIEW.md`、`docs/GATE3-REVIEW.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`。
 > 限制：旧插件/存储写回使用副本，未对真实 `~/.dsh` 做破坏性演练；S9 需明确指向 #6.25；S2 约束重复、S7 略多。
 
-> **Stage 4 的 B1–B5 已完成（2026-10-20）**：Project Plan 三表与阶段模型、Markdown 导入导出与确认、阶段上下文包与只读工具、第二个“计划”页签。
-> 测试：`verify-plan` 73/73、`verify-phase` 66/66、`verify-import` 67/67、`verify-context` 46/46、`verify-client` 12/12，连同原有 5 个脚本共 **753** 项通过；计划页手工验收见 `docs/B5-ACCEPTANCE.md`。
-> C1–C4（结果证据分级、diff、提议/确认/历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
+> **Stage 4 的 B1–B5 与 C1 已完成（2026-10-20）**：Project Plan 三表与阶段模型、Markdown 导入导出与确认、阶段上下文包与只读工具、第二个“计划”页签、阶段结果与测试证据提议。
+> 测试：`verify-plan` 73/73、`verify-phase` 66/66、`verify-import` 67/67、`verify-context` 46/46、`verify-client` 12/12、`verify-evidence` 32/32，连同原有 5 个脚本共 **785** 项通过；计划页与 C1 提议/应用手工验收见 `docs/B5-ACCEPTANCE.md`。
+> C2–C4（diff/影响阶段、项目级提议/确认、版本历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
 
-## 13. Project Plan（Stage 4，B1–B5）
+## 13. Project Plan（Stage 4，B1–B5、C1）
 
-> **状态（2026-10-20）：B1–B5 已完成。** C1–C4、D1–D3、E2–E4 仍未实现。
+> **状态（2026-10-20）：B1–B5 与 C1 已完成。** C2–C4、D1–D3、E2–E4 仍未实现。
 
 ### 13.1 范围与不变量
 
@@ -741,7 +741,9 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 - 项目：`plan.list/detail/create/patch/remove`；阶段：`plan.phase.add/update/remove/split/move/status/result`；提议：`plan.proposal.list/apply/reject`；历史与导出：`plan.change.list`、`plan.export`；导入：`plan.import.preview/commit`；交接：`plan.context`。
 - `plan.export` 默认返回 JSON 快照；`format:'markdown'` 返回文本；再给 `write:true` 时写入项目工作区并返回路径（不覆盖同名文件，收件箱拒绝）。
 - AI 侧只读工具：`todo_plan_read`（项目/阶段/依赖/验收/结果）和 `todo_plan_context`（阶段交接）。
+- AI 侧写入口只有 `todo_plan_propose`：它只写 `phase-result` 提议，不能应用；`plan.proposal.apply` 只给计划页（开发者），可带 `confirmTests`。
 - 提议的 `baseVersion` 与项目当前版本不一致时返回 `plan/stale`；应用后版本 +1、追加历史、提议标记 applied。
+- `phase-result` 提议带 `phaseId`、`result` 和可选 `suggestedStatus`（建议状态与应用后的阶段状态分开存）；应用时可带 `confirmTests`。
 
 ### 13.5 Markdown 导入/导出（B3）
 
@@ -754,14 +756,25 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 - 第二个 `sidebarRightTabs` 类型 `todo-assistant-plan`，slot key 同名，`priority:'extension'`，guide 中与卡片页并列；卡片页的类型、key、视图和写入都不变。
 - 页面：项目列表（待处理提议角标）→ 项目详情（目标、当前阶段、阶段树、阶段操作、项目决策/风险/来源、待处理提议、变更历史）→ 导入面板（预览/确认/保存）→ 导出按钮。
 - 阶段操作：开始阶段（新会话 + 交接文本，会话打开后把阶段标为进行中）、插入交接（只预填输入框）、编辑（编号/标题/目标/下一步/依赖/验收/必须保留）、拆分（一行一个标题）、改状态、记录结果。
+- 提议面板：`phase-result` 显示阶段、结果、每条测试的证据级别（工具结果/开发者确认/AI 声称）、整体证据级别、建议状态和基于版本；“我确认这些测试结果”勾选后应用才把无工具证据的测试升级为开发者确认。
 - 4 秒静默轮询仅在页签可见时运行；错误显示在页内，不白屏。
 - 手工验收记录（A–E 路线图、导入/拆分/当前阶段/开始阶段/插入/导出/卡片页回归）见 `docs/B5-ACCEPTANCE.md`。
 
 ### 13.7 已知限制
 
-- 计划页暂无“提出修改”（C 才有提议功能）、删除项目、阶段重编号和拖拽排序（D/E）。
+- 计划页暂无项目级“提出修改”（C2–C4）、删除项目、阶段重编号和拖拽排序（D/E）；阶段结果提议（C1）已可用。
 - 交接文本约 4000 字上限；超限会截断次要来源并提示 `todo_plan_read`。
 - 旧版本写回会丢掉 `projects`/`plan_proposals`/`plan_changes` 三张表（single-layout 只序列化自己声明的表）；升级前备份。
+
+---
+
+### 13.8 阶段结果与测试证据（C1）
+
+- **证据收集**：`evidence.js` 从当前会话的 `tool/call`/`tool/result` 配对测试命令（npm/pnpm/yarn test、pytest、vitest、jest、go test、cargo test、swift test、xcodebuild test、node scripts/verify-* 等），按结果错误、`[exit code: N]`、超时/信号判定通过或失败；非 shell 工具忽略。
+- **AI 只能提议**：`todo_plan_propose` 把 AI 提交的结果规范化为 `PhaseResult`，强制其测试为 `ai-claim`，再与真实工具结果合并：匹配的命令升级为 `tool-result` 并以实际状态为准；只补**当前这一轮**（最近一条用户消息之后）漏说的测试，避免把以前调试的失败带进新结果。
+- **应用**：`plan.proposal.apply` 由开发者在计划页触发；不勾确认时无工具证据的测试保持 `ai-claim`，勾选“我确认这些测试结果”则升级为 `developer`。应用写入 `phase.result`，可选写入建议状态，并记录一条 `phase-result` change；AI 没有应用入口。
+- **结果级证据**：有 `tool-result`/`developer` 证据且测试都通过 → `verified`；有失败 → `unverified`；没有证据 → `claimed`。
+- **已知限制**：只扫描当前会话；子会话执行的测试不在父会话记录里；命令识别是启发式，认不出的测试命令按 `ai-claim` 处理；一条提议里的测试最多 20 条。
 
 ---
 

@@ -2,10 +2,10 @@
 
 > **仓库**：`zangoose335/dsh-todo-assistant`，基线提交 `be8ebf4`（`docs: fix inbox wording and note multiple markers per reply`）。
 > **本次范围**：基于现有 `docs/PLAN.md` 修订开发计划；本次仅修改本文件，未修改源码、测试、README、`docs/DESIGN.md`，未提交，未实现任何功能。
-> **基线验证（2026-10-20）**：`node scripts/verify-domain.mjs` **262/262**；Stage 4 完成后全部 10 个脚本共 **753** 项通过（明细见 §8.1）；`git diff --check` 通过。
+> **基线验证（2026-10-20）**：`node scripts/verify-domain.mjs` **262/262**；B1–B5 与 C1 完成后全部 11 个脚本共 **785** 项通过（明细见 §8.1）；`git diff --check` 通过。
 > **核心结论（历史：计划修订时的现状）**：当时实现是“卡片式旁支任务工作台 + 单范围（origin.seqRange）原文回读”，卡片已有 `core`/`mustRead`/`park`，但**没有结构化任务简报，也没有卡片质量门禁**；Project Plan、计划持续维护、Markdown 导入、拖拽插入、卡片步骤编号均未实现。本次修订把“从当前上下文提炼必要情报并创建高质量待办”定为 Stage 1 / MVP；历史补全、交接、Project Plan 与导入均为后续阶段。README 的部分措辞需要先修正。
 >
-> **当前状态（2026-10-20）**：Stage 1–3 与 Gate 1/2/3 已完成；Stage 4 的 B1–B5（Project Plan 数据/阶段/导入导出/上下文包/计划 tab）已完成并通过自动回归 + 计划页手工验收。C1–C4（结果证据、diff、提议/确认/历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
+> **当前状态（2026-10-20）**：Stage 1–3 与 Gate 1/2/3 已完成；Stage 4 的 B1–B5（Project Plan 数据/阶段/导入导出/上下文包/计划 tab）和 C1（阶段结果与测试证据）已完成并通过自动回归 + 手工验收。C2–C4（diff、通用提议/确认、版本历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
 
 ---
 
@@ -862,7 +862,7 @@ graph TD
 | T4 数据兼容 | 基础实现 + 真实旧代码探针；旧插件 UI 未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；另外用 `be8ebf4` 真实旧代码验证 `brief` 与 `sources` 会被 strip/写回丢失；**仍不是旧插件在真实 UI 中运行** |
 | T5 / Gate 1 | **通过（PASS，带范围限制）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；修正后隔离语义探针 10/10 通过；真实 UI、`todo_recall`、旧插件 UI、存储副本和场景 10 均已验证；详见 `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md` |
 
-验证基线（2026-10-20，B1–B5 完成；源码 `2839fe9` + 之后未提交的改动）：
+验证基线（2026-10-20，B1–B5、C1 完成；源码 `2839fe9` + 之后未提交的改动）：
 
 - `node scripts/verify-domain.mjs` → **262/262**
 - `node scripts/verify-brief.mjs` → **118/118**
@@ -874,9 +874,10 @@ graph TD
 - `node scripts/verify-import.mjs` → **67/67**（含 A–E 路线图、写文件不覆盖）
 - `node scripts/verify-context.mjs` → **46/46**
 - `node scripts/verify-client.mjs` → **12/12**（第二个页签注册冒烟）
+- `node scripts/verify-evidence.mjs` → **32/32**（测试证据配对、提议、应用与确认）
 - `git diff --check` → **通过**
 
-合计 **753** 项；计划页的导入、拆分、当前阶段、开始阶段、插入交接和导出已由开发者手工验收（`docs/B5-ACCEPTANCE.md`）。
+合计 **785** 项；计划页的导入、拆分、当前阶段、开始阶段、插入交接和导出已由开发者手工验收（`docs/B5-ACCEPTANCE.md`）；C1 的真实提议/拒绝/应用也已手工验收（项目到第 6 版，A1 结果为 verified）。
 
 运行时时序：2026-10-19 严格复核时 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；统一 blocking 语义并补 back-reference 规则后为 **6456** 字符（sha256 `83de5a20…`）。S3/S4/S5/S6/S9 已复跑通过；真实运行验收已在 `docs/GATE1-RUNTIME-ACCEPTANCE.md` 补齐。
 
@@ -1261,6 +1262,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 #### C1 阶段执行结果记录与测试证据
 
+> **状态（2026-10-20）：完成。** 新增 `evidence.js`：从当前会话的 `tool/call`/`tool/result` 配对测试命令，按退出码/超时判定通过或失败，非 shell 工具忽略；`todo_plan_propose` 只写阶段结果提议（force AI 声称，真实工具结果覆盖并升级为 `tool-result`，只补当前这一轮的漏项）；`plan.proposal.apply` 由开发者应用，可勾选“我确认测试结果”把无工具证据的测试升级为 `developer`；计划页显示每条测试的证据级别、建议状态与基于版本。结果级证据：有工具/开发者证据且测试通过 → `verified`，有失败 → `unverified`，否则 `claimed`。新增 `scripts/verify-evidence.mjs` **32/32**；真实提议拒绝/应用已手工验收（项目到第 6 版，A1 结果为 verified）。
+
 - **目标与原因**：阶段执行后整理实际完成、文件、测试结果、新问题、风险、决策变化、计划差异；不能因 AI 声称完成就认定测试通过。
 - **当前问题**：没有结果模型；没有测试证据；没有 verification 级别。
 - **实施方向**：
@@ -1549,12 +1552,12 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - P0-E1/D0：编号/拖拽调查结论（不阻塞 Stage 1-3）。
 - B1/B2/B4/B5：Project Plan、阶段/依赖/验收、阶段上下文包、计划 tab；在 Gate 1/2/3 后启动。**已完成（2026-10-20）。**
 - **B3（Markdown 导入/导出）**：排在 B2 之后，且必须等 Gate 1/2/3；届时优先确定性解析器，AI 辅助导入可选。**已完成（2026-10-20，确定性解析器；AI 辅助导入未做）。**
-- C1-C4：持续维护、diff、确认/历史。**未实现。**
+- C1-C4：持续维护、diff、确认/历史。**C1 已完成（2026-10-20）；C2–C4 未实现。**
 - E2-E4：卡片步骤/编号；D1-D3：拖拽交接。**未实现。**
-- 所有 Stage 4 功能不得反向阻塞 Stage 1-3；回归现有 753 项 + Gate 1-3 测试。
+- 所有 Stage 4 功能不得反向阻塞 Stage 1-3；回归现有 785 项 + Gate 1-3 测试。
 - 文档更新。
 
-> **状态（2026-10-20）**：B1–B5 完成并回归（10 个脚本、753 项）；计划页手工验收通过（`docs/B5-ACCEPTANCE.md`）。C/D/E 仍为后续阶段。
+> **状态（2026-10-20）**：B1–B5 与 C1 完成并回归（11 个脚本、785 项）；计划页与 C1 的结果提议/应用已手工验收（`docs/B5-ACCEPTANCE.md` 与 §8.2）。C2–C4、D/E 仍为后续阶段。
 
 ### Gate Docs：文档与产品承诺
 
@@ -1563,7 +1566,7 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - DESIGN 更新新模型、MVP 范围、测试计数、已知偏差。
 - 每个 Gate 完成后同步对应文档，而不是最后一次性补。
 
-> **Gate Docs 状态（2026-10-20 更新）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险、测试计数和 Gate 1/2/3 结论；Gate 1/2/3 均为**通过（带范围限制）**。Stage 4 的 B1–B5 已完成，README/PLAN/DESIGN 已同步计划页、导入导出、阶段交接、753 项验证和 `docs/B5-ACCEPTANCE.md`；C/D/E 仍未实现。
+> **Gate Docs 状态（2026-10-20 更新）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险、测试计数和 Gate 1/2/3 结论；Gate 1/2/3 均为**通过（带范围限制）**。Stage 4 的 B1–B5 与 C1 已完成，README/PLAN/DESIGN 已同步计划页、导入导出、阶段交接、阶段结果证据、785 项验证和 `docs/B5-ACCEPTANCE.md`；C2–C4、D/E 仍未实现。
 
 ---
 
@@ -1678,7 +1681,8 @@ T5 必须优先验证：
 | A5（Stage 2） | observed/stated、文档路径、种子文本、路径归一化、无 fs 降级 | 同上/纯函数 |
 | A6（Stage 2） | 历史功能 10 项 + Token 10 场景 + **累计成本指标**（消息/事件/字符/索引 vs 正文/批次/重复读取/当前足够时是否读取/简报是否足够避免复研） | 同上 + 行为探针 |
 | B1-B5（Stage 4） | Project Plan/阶段/上下文包/计划 tab/Markdown 导入导出；2026-10-20 全部完成 | `verify-plan.mjs` 73/73、`verify-phase.mjs` 66/66、`verify-import.mjs` 67/67、`verify-context.mjs` 46/46、`verify-client.mjs` 12/12；手工记录见 `docs/B5-ACCEPTANCE.md` |
-| C1-C4（Stage 4） | 结果/证据、diff、proposal/apply/history、版本 | 同上 |
+| C1（Stage 4） | 阶段结果、测试证据、propose/apply、开发者确认、证据级别 | `scripts/verify-evidence.mjs` 32/32；计划页手工应用/拒绝已验收 |
+| C2-C4（Stage 4） | diff/影响阶段、通用 proposal/apply/history、版本重放 | 未实现 |
 | E2-E3（Stage 4） | 步骤模型/CRUD/重排/种子；拖拽冲突 | `scripts/verify-domain.mjs` + 手工 |
 | D1-D2（Stage 4） | payload/插入文本纯函数、缺失 id、长文本 | 纯函数 + 手工 |
 | 普通卡回归 | 全部现有测试 | 每个 Gate |
@@ -1700,8 +1704,9 @@ T5 必须优先验证：
 - 插入当前输入框：是否只预填、不发送、不建卡；简报是否足够；简单卡是否保持轻量。
 
 **Stage 4（扩展）**
-- B1–B5 已完成（2026-10-20）：Project Plan、阶段/依赖/验收/结果、Markdown 导入导出、阶段上下文包、计划 tab 与 A–E 路线图手工验收。
-- 仍未实现：C3 proposal/apply/history、D1/D2 拖拽、E3 步骤；它们不影响 Gate 1 判定。
+- B1–B5 与 C1 已完成（2026-10-20）：Project Plan、阶段/依赖/验收/结果、Markdown 导入导出、阶段上下文包、计划 tab 与 A–E 路线图手工验收；C1 的证据提议/应用已手工验收。
+- C1 已完成（2026-10-20）：阶段结果、测试证据、propose/apply 与开发者确认。
+- 仍未实现：C2 diff/影响阶段、C3 通用 proposal/apply/history、C4 版本重放、D1/D2 拖拽、E3 步骤；它们不影响 Gate 1 判定。
 
 ### 8.3 测试数据
 
@@ -1805,7 +1810,7 @@ T5 必须优先验证：
 
 ## 附：建议的最小提交顺序（批准后）
 
-> **状态（2026-10-20）**：第 17–21 项（B1–B5）已完成；C1–C4、D1–D3、E2–E4 仍未实现。
+> **状态（2026-10-20）**：第 17–22 项（B1–B5、C1）已完成；C2–C4、D1–D3、E2–E4 仍未实现。
 
 > 顺序按 Stage 1 → Stage 2 → Stage 3 → Stage 4。Stage 1 未过 Gate 1 前，不建议合并 A/B/C/D/E 的产品实现。文档/README 可并行，但不得提前宣称未实现能力。
 
