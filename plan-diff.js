@@ -205,7 +205,8 @@ function changedPids(diff) {
 export function affectedPhaseIds(before, after, diff) {
   const seed = changedPids(diff)
   const phases = Array.isArray(after?.phases) ? after.phases : []
-  if (seed.size === 0) return []
+  const currentChanged = (diff?.project ?? []).some((entry) => entry.field === 'currentPhaseId')
+  if (seed.size === 0 && !currentChanged) return []
   const dependents = new Map()
   for (const phase of phases) {
     for (const dependency of phase.dependsOn ?? []) {

@@ -1123,12 +1123,17 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
     }
     for (const field of ['decisions', 'risks']) {
       const delta = diff?.[field] ?? {}
-      if ((delta.added ?? []).length > 0 || (delta.removed ?? []).length > 0) {
-        lines.push(`${field}: +${(delta.added ?? []).join('; ')} -${(delta.removed ?? []).join('; ')}`)
-      }
+      if ((delta.added ?? []).length === 0 && (delta.removed ?? []).length === 0) continue
+      const parts = []
+      if ((delta.added ?? []).length > 0) parts.push(`+${delta.added.join('; ')}`)
+      if ((delta.removed ?? []).length > 0) parts.push(`-${delta.removed.join('; ')}`)
+      lines.push(`${field}: ${parts.join(' ')}`)
     }
     if ((diff?.sources?.added ?? []).length > 0 || (diff?.sources?.removed ?? []).length > 0) {
-      lines.push(`sources: +${(diff.sources.added ?? []).join('; ')} -${(diff.sources.removed ?? []).join('; ')}`)
+      const parts = []
+      if ((diff?.sources?.added ?? []).length > 0) parts.push(`+${diff.sources.added.join('; ')}`)
+      if ((diff?.sources?.removed ?? []).length > 0) parts.push(`-${diff.sources.removed.join('; ')}`)
+      lines.push(`sources: ${parts.join(' ')}`)
     }
     return lines.length === 0 ? ['(no visible change)'] : lines
   }
@@ -1136,7 +1141,7 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
   return defineTool({
     name: 'todo_plan_propose',
     description: [
-      'Propose one plan change: a phase result (kind=phase-result), a new phase, a phase split, dependency changes, or acceptance/decision changes.',
+      'Propose one plan change: a phase result (kind=phase-result), a new phase, a phase split, dependency changes, acceptance/decision changes, or project-level field changes (kind=project-patch).',
       'It only records a proposal. It never changes the plan; the host computes the structured diff and the affected phases, and you must show them to the developer. Only the developer can apply or reject it in the Plan page.',
       'For a phase result, test commands you report are checked against tools this session actually ran; only real tool results count as evidence, everything else stays an AI claim. Do not claim completion on your own.',
     ].join(' '),
@@ -1145,12 +1150,33 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
       baseVersion: { type: 'integer', required: true, description: 'The project version you read; a stale version is rejected.' },
       kind: {
         type: 'string',
-        enum: ['phase-result', 'phase-add', 'phase-split', 'dependency', 'acceptance'],
+        enum: ['phase-result', 'phase-add', 'phase-split', 'dependency', 'acceptance', 'project-patch'],
         description: 'What to propose. Defaults to phase-result.',
       },
       phaseId: {
         type: 'string',
         description: 'Target phase pid (ph_…); required for phase-result, phase-split, dependency and acceptance.',
+      },
+      name: { type: 'string', description: 'project-patch only: new project name.' },
+      goal: { type: 'string', description: 'project-patch only: new project goal (also used by phase-add).' },
+      projectStatus: {
+        type: 'string',
+        enum: ['active', 'paused', 'done', 'dropped'],
+        description: 'project-patch only: new project status.',
+      },
+      currentPhaseNumber: {
+        type: 'string',
+        description: 'project-patch only: display number of the new current phase; pass an empty string to clear it.',
+      },
+      projectDecisions: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'project-patch only: project decision items (replaces the current list).',
+      },
+      projectRisks: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'project-patch only: project risk items (replaces the current list).',
       },
       result: {
         type: 'object',
@@ -1334,6 +1360,39 @@ export function createTodoPlanProposeTool({ defineTool, store, now = Date.now })
         input.phaseId = phaseId
         input.result = mergeResultEvidence(sanitized, observed, { at, append: appended })
         if (typeof args?.status === 'string' && args.status !== '') input.status = args.status
+      } else if (kind === 'project-patch') {
+        const patch = {}
+        if (args?.name !== undefined) patch.name = args.name
+        if (args?.goal !== undefined) patch.goal = args.goal
+        if (args?.projectStatus !== undefined) patch.status = args.projectStatus
+        if (args?.currentPhaseNumber !== undefined) {
+          const wanted = String(args.currentPhaseNumber).trim()
+          if (wanted === '') {
+            patch.currentPhaseId = null
+          } else {
+            const found = (project.phases ?? []).find(
+              (phase) => phase.pid === wanted || phase.number.toLowerCase() === wanted.toLowerCase(),
+            )
+            if (found === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${wanted} 不存在`)
+            patch.currentPhaseId = found.pid
+          }
+        }
+        if (Array.isArray(args?.projectDecisions)) {
+          patch.decisions = args.projectDecisions
+            .map((text) => String(text).trim())
+            .filter((text) => text !== '')
+            .map((text) => ({ label: 'decision', text, basis: 'decided' }))
+        }
+        if (Array.isArray(args?.projectRisks)) {
+          patch.risks = args.projectRisks
+            .map((text) => String(text).trim())
+            .filter((text) => text !== '')
+            .map((text) => ({ label: 'risk', text, basis: 'decided' }))
+        }
+        if (Object.keys(patch).length === 0) {
+          throw new TodoInputError('plan/no-change', 'project-patch 提议至少要改一个项目字段')
+        }
+        input.patch = patch
       } else if (kind === 'phase-add') {
         input.number = args?.number
         input.title = args?.title

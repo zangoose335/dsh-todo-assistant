@@ -44,6 +44,26 @@ window.__ModuleLoader__.load({
       developer: 'plan.test.developer',
       'ai-claim': 'plan.test.aiClaim',
     }
+    const PROPOSAL_STATUS_LABEL = {
+      applied: 'plan.proposalstatus.applied',
+      rejected: 'plan.proposalstatus.rejected',
+    }
+    const CHANGE_KIND_LABEL = {
+      create: 'plan.kind.create',
+      patch: 'plan.kind.patch',
+      'phase-add': 'plan.kind.phase-add',
+      'phase-update': 'plan.kind.phase-update',
+      'phase-remove': 'plan.kind.phase-remove',
+      'phase-split': 'plan.kind.phase-split',
+      'phase-move': 'plan.kind.phase-move',
+      'phase-status': 'plan.kind.phase-status',
+      'phase-result': 'plan.kind.phase-result',
+    }
+    const CHANGE_BY_LABEL = {
+      proposal: 'plan.by.proposal',
+      developer: 'plan.by.developer',
+      system: 'plan.by.system',
+    }
     /** UI sentinels; the host only ever sees a workspace path or `inbox`. */
     const SCOPE_INBOX = '@inbox'
     const SCOPE_ALL = '@all'
@@ -353,6 +373,21 @@ window.__ModuleLoader__.load({
       'plan.diff.affected': '受影响阶段',
       'plan.diff.none': '没有可见变化',
       'plan.diff.stale': '提议基于旧版本，计划已经变了；请重新读取后再提议。',
+      'plan.apply.confirm': '确认应用',
+      'plan.apply.cancel': '取消',
+      'plan.proposals.history': '提议历史',
+      'plan.proposalstatus.applied': '已应用',
+      'plan.proposalstatus.rejected': '已拒绝',
+      'plan.proposals.rejectedReason': '拒绝原因',
+      'plan.kind.patch': '项目字段',
+      'plan.kind.create': '创建计划',
+      'plan.kind.phase-update': '修改阶段',
+      'plan.kind.phase-remove': '删除阶段',
+      'plan.kind.phase-move': '移动阶段',
+      'plan.kind.phase-status': '改状态',
+      'plan.by.proposal': '提议应用',
+      'plan.by.developer': '直接编辑',
+      'plan.by.system': '系统',
       'plan.parent': '父阶段',
       'plan.resultField': '结果',
       'plan.completed': '已完成',
@@ -658,6 +693,21 @@ Keep in mind
       'plan.diff.affected': 'Affected phases',
       'plan.diff.none': 'No visible change',
       'plan.diff.stale': 'This proposal is based on an older version; re-read the plan and propose again.',
+      'plan.apply.confirm': 'Confirm apply',
+      'plan.apply.cancel': 'Cancel',
+      'plan.proposals.history': 'Proposal history',
+      'plan.proposalstatus.applied': 'applied',
+      'plan.proposalstatus.rejected': 'rejected',
+      'plan.proposals.rejectedReason': 'Rejected',
+      'plan.kind.patch': 'Project fields',
+      'plan.kind.create': 'Create plan',
+      'plan.kind.phase-update': 'Update phase',
+      'plan.kind.phase-remove': 'Remove phase',
+      'plan.kind.phase-move': 'Move phase',
+      'plan.kind.phase-status': 'Phase status',
+      'plan.by.proposal': 'proposal',
+      'plan.by.developer': 'developer',
+      'plan.by.system': 'system',
       'plan.parent': 'Parent',
       'plan.resultField': 'Result',
       'plan.completed': 'Completed',
@@ -954,6 +1004,8 @@ Keep in mind
 .tplan-preview { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; background: var(--dsw-alias-bg-layer-1); }
 .tplan-check { display: flex; align-items: center; gap: 4px; font-size: 11px; }
 .tplan-listline { font-size: 10px; color: var(--dsw-alias-label-secondary); word-break: break-word; }
+.tplan-diff-add { color: rgb(23, 179, 0); }
+.tplan-diff-del { color: var(--dsw-alias-state-error-primary); }
 .tplan-change { font-size: 10px; color: var(--dsw-alias-label-secondary); word-break: break-word; }
 .tplan-busy { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .12s linear; }
 .tplan-busy[data-on="true"] { opacity: 1; }
@@ -3280,6 +3332,8 @@ Keep in mind
         const [form, setForm] = React.useState(null)
         const [showChanges, setShowChanges] = React.useState(false)
         const [confirmTests, setConfirmTests] = React.useState({})
+        const [confirmApplyId, setConfirmApplyId] = React.useState(null)
+        const [showProposalHistory, setShowProposalHistory] = React.useState(false)
         const busyRef = React.useRef(false)
         const selectedRef = React.useRef(null)
 
@@ -3380,6 +3434,8 @@ Keep in mind
           setExportPath('')
           setShowChanges(false)
           setConfirmTests({})
+          setConfirmApplyId(null)
+          setShowProposalHistory(false)
           setErrorText('')
         }
 
@@ -3516,6 +3572,7 @@ Keep in mind
               id: proposal.id,
               confirmTests: confirmTests[proposal.id] === true,
             })
+            setConfirmApplyId(null)
             await reload(detail.id)
           })
         }
@@ -3524,6 +3581,7 @@ Keep in mind
           if (detail === null) return
           void run(async () => {
             await call('plan.proposal.reject', { id: proposal.id })
+            setConfirmApplyId(null)
             await reload(detail.id)
           })
         }
@@ -4046,15 +4104,32 @@ Keep in mind
 
         function renderProposal(proposal, project) {
           const stale = proposal.baseVersion !== project.version
+          const confirming = confirmApplyId === proposal.id
           const actions = h(
             'div',
             { className: 'tplan-row' },
-            h(
-              'button',
-              { type: 'button', className: 'tplan-action', disabled: busy || stale, onClick: () => applyProposal(proposal) },
-              t('plan.apply'),
-            ),
-            h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) }, t('plan.reject')),
+            confirming
+              ? h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) },
+                  t('plan.apply.confirm'),
+                )
+              : h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy || stale, onClick: () => setConfirmApplyId(proposal.id) },
+                  t('plan.apply'),
+                ),
+            confirming
+              ? h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => setConfirmApplyId(null) },
+                  t('plan.apply.cancel'),
+                )
+              : h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) },
+                  t('plan.reject'),
+                ),
           )
           const fieldLabel = (field) =>
             ({
@@ -4070,40 +4145,55 @@ Keep in mind
             })[field] ?? field
           const diffLines = []
           const diff = proposal.diff ?? {}
+          const line = (...segments) => diffLines.push(segments)
+          const plus = (text) => ({ text: `+${text}`, tone: 'add' })
+          const minus = (text) => ({ text: `-${text}`, tone: 'del' })
           for (const entry of diff.project ?? []) {
-            diffLines.push(`${t('plan.diff.project')} ${fieldLabel(entry.field)}: ${entry.before ?? t('plan.none')} → ${entry.after ?? t('plan.none')}`)
+            line({
+              text: `${t('plan.diff.project')} ${fieldLabel(entry.field)}: ${entry.before ?? t('plan.none')} → ${entry.after ?? t('plan.none')}`,
+            })
           }
-          for (const item of diff.phases?.added ?? []) diffLines.push(`+ ${item.number} ${item.title}`)
-          for (const item of diff.phases?.removed ?? []) diffLines.push(`- ${item.number} ${item.title}`)
+          for (const item of diff.phases?.added ?? []) line({ text: '+ ', tone: 'add' }, { text: `${item.number} ${item.title}` })
+          for (const item of diff.phases?.removed ?? []) line({ text: '- ', tone: 'del' }, { text: `${item.number} ${item.title}` })
           for (const item of diff.phases?.modified ?? []) {
-            diffLines.push(
-              `~ ${item.number} ${item.title}: ${item.fields
+            line({
+              text: `~ ${item.number} ${item.title}: ${item.fields
                 .map((field) => `${fieldLabel(field.field)} ${field.before ?? t('plan.none')} → ${field.after ?? t('plan.none')}`)
                 .join('; ')}`,
-            )
+            })
           }
           for (const item of diff.dependencies ?? []) {
-            const parts = []
-            if ((item.added ?? []).length > 0) parts.push(`+${item.added.join(', ')}`)
-            if ((item.removed ?? []).length > 0) parts.push(`-${item.removed.join(', ')}`)
-            diffLines.push(`${t('plan.diff.deps')} ${item.number}: ${parts.join(' ')}`)
+            const segments = [{ text: `${t('plan.diff.deps')} ${item.number}: ` }]
+            if ((item.added ?? []).length > 0) segments.push(plus(item.added.join(', ')))
+            if ((item.added ?? []).length > 0 && (item.removed ?? []).length > 0) segments.push({ text: ' ' })
+            if ((item.removed ?? []).length > 0) segments.push(minus(item.removed.join(', ')))
+            line(...segments)
           }
           for (const item of diff.acceptance ?? []) {
-            const parts = []
-            if ((item.added ?? []).length > 0) parts.push(`+${item.added.join('; ')}`)
-            if ((item.removed ?? []).length > 0) parts.push(`-${item.removed.join('; ')}`)
             const label =
               item.field === 'acceptance' ? t('plan.acceptance') : item.field === 'mustKeep' ? t('plan.mustKeep') : t('plan.decisions')
-            diffLines.push(`${label} ${item.number}: ${parts.join(' ')}`)
+            const segments = [{ text: `${label} ${item.number}: ` }]
+            if ((item.added ?? []).length > 0) segments.push(plus(item.added.join('; ')))
+            if ((item.added ?? []).length > 0 && (item.removed ?? []).length > 0) segments.push({ text: ' ' })
+            if ((item.removed ?? []).length > 0) segments.push(minus(item.removed.join('; ')))
+            line(...segments)
           }
           for (const field of ['decisions', 'risks']) {
             const delta = diff[field] ?? {}
             if ((delta.added ?? []).length === 0 && (delta.removed ?? []).length === 0) continue
             const label = field === 'decisions' ? t('plan.decisions') : t('plan.risks')
-            diffLines.push(`${label}: +${(delta.added ?? []).join('; ')} -${(delta.removed ?? []).join('; ')}`)
+            const segments = [{ text: `${label}: ` }]
+            if ((delta.added ?? []).length > 0) segments.push(plus(delta.added.join('; ')))
+            if ((delta.added ?? []).length > 0 && (delta.removed ?? []).length > 0) segments.push({ text: ' ' })
+            if ((delta.removed ?? []).length > 0) segments.push(minus(delta.removed.join('; ')))
+            line(...segments)
           }
           if ((diff.sources?.added ?? []).length > 0 || (diff.sources?.removed ?? []).length > 0) {
-            diffLines.push(`${t('plan.sources')}: +${(diff.sources.added ?? []).join('; ')} -${(diff.sources.removed ?? []).join('; ')}`)
+            const segments = [{ text: `${t('plan.sources')}: ` }]
+            if ((diff.sources?.added ?? []).length > 0) segments.push(plus(diff.sources.added.join('; ')))
+            if ((diff.sources?.added ?? []).length > 0 && (diff.sources?.removed ?? []).length > 0) segments.push({ text: ' ' })
+            if ((diff.sources?.removed ?? []).length > 0) segments.push(minus(diff.sources.removed.join('; ')))
+            line(...segments)
           }
           const byPid = new Map((project.phases ?? []).map((entry) => [entry.pid, entry]))
           const affected = (proposal.affectedPhaseIds ?? [])
@@ -4127,7 +4217,23 @@ Keep in mind
               ),
               ...(diffLines.length === 0
                 ? [h('div', { className: 'tplan-listline' }, t('plan.diff.none'))]
-                : diffLines.map((line, index) => h('div', { key: `diff-${index}`, className: 'tplan-listline' }, `- ${line}`))),
+                : diffLines.map((segments, index) =>
+                    h(
+                      'div',
+                      { key: `diff-${index}`, className: 'tplan-listline' },
+                      ...segments.map((segment, position) =>
+                        h(
+                          'span',
+                          {
+                            key: position,
+                            className:
+                              segment.tone === 'add' ? 'tplan-diff-add' : segment.tone === 'del' ? 'tplan-diff-del' : undefined,
+                          },
+                          segment.text,
+                        ),
+                      ),
+                    ),
+                  )),
               base,
               stale ? h('div', { className: 'tplan-err' }, t('plan.diff.stale')) : null,
               proposal.reason === '' || proposal.reason === undefined ? null : h('div', { className: 'tplan-hint' }, proposal.reason),
@@ -4212,6 +4318,39 @@ Keep in mind
           )
         }
 
+        function renderProposalHistory(project) {
+          const done = proposals.filter((item) => item.status === 'applied' || item.status === 'rejected').slice(0, 20)
+          if (done.length === 0) return null
+          const byPid = new Map((project.phases ?? []).map((entry) => [entry.pid, entry]))
+          return h(
+            'div',
+            { className: 'tplan-section', key: 'proposal-history' },
+            h(
+              'div',
+              { className: 'tplan-sec-head' },
+              h(
+                'button',
+                { type: 'button', className: 'tplan-btn', onClick: () => setShowProposalHistory((open) => !open) },
+                `${t('plan.proposals.history')} (${done.length})`,
+              ),
+            ),
+            showProposalHistory
+              ? h(
+                  'div',
+                  null,
+                  ...done.map((proposal) => {
+                    const phase = proposal.phaseId === undefined ? undefined : byPid.get(proposal.phaseId)
+                    return h(
+                      'div',
+                      { key: proposal.id, className: 'tplan-change' },
+                      `${t(`plan.kind.${proposal.kind}`) ?? proposal.kind}${phase === undefined ? '' : ` · ${phase.number} ${phase.title}`} · ${statusText(t, proposal.status, PROPOSAL_STATUS_LABEL)}${proposal.reason ? ` · ${proposal.reason}` : ''}${proposal.rejectedReason ? ` · ${t('plan.proposals.rejectedReason')}: ${proposal.rejectedReason}` : ''} · ${timeAgo(t, proposal.appliedAt ?? proposal.createdAt)}`,
+                    )
+                  }),
+                )
+              : null,
+          )
+        }
+
         function renderChanges() {
           if (changes.length === 0) return null
           return h(
@@ -4238,7 +4377,7 @@ Keep in mind
                       h(
                         'div',
                         { key: change.id, className: 'tplan-change' },
-                        `${fill2(t('plan.change.v'), { n: change.version })} · ${change.kind}${change.reason ? ` · ${change.reason}` : ''} · ${timeAgo(t, change.at)}`,
+                        `${fill2(t('plan.change.v'), { n: change.version })} · ${statusText(t, change.kind, CHANGE_KIND_LABEL)} · ${statusText(t, change.by, CHANGE_BY_LABEL)}${change.reason ? ` · ${change.reason}` : ''} · ${timeAgo(t, change.at)}`,
                       ),
                     ),
                 )
@@ -4307,6 +4446,7 @@ Keep in mind
             ),
             ...renderProjectsSections(project),
             renderProposals(project),
+            renderProposalHistory(project),
             renderChanges(),
           ]
         }
