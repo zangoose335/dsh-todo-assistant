@@ -388,6 +388,18 @@ window.__ModuleLoader__.load({
       'plan.by.proposal': '提议应用',
       'plan.by.developer': '直接编辑',
       'plan.by.system': '系统',
+      'plan.change.initial': '初始计划',
+      'plan.change.initialVsCurrent': '初始 vs 当前',
+      'plan.change.loadMore': '加载更多',
+      'plan.change.close': '收起',
+      'plan.change.diffTitle': '版本 {from} → {to}',
+      'plan.change.unavailable': '这段历史只存摘要，无法展开完整版本',
+      'plan.decisionHistory': '决策历史',
+      'plan.decision.added': '新增',
+      'plan.decision.removed': '移除',
+      'plan.decision.proposal': '提议',
+      'plan.decision.none': '暂无决策记录',
+      'plan.phaseDecisions': '阶段决策',
       'plan.parent': '父阶段',
       'plan.resultField': '结果',
       'plan.completed': '已完成',
@@ -708,6 +720,18 @@ Keep in mind
       'plan.by.proposal': 'proposal',
       'plan.by.developer': 'developer',
       'plan.by.system': 'system',
+      'plan.change.initial': 'Initial plan',
+      'plan.change.initialVsCurrent': 'Initial vs current',
+      'plan.change.loadMore': 'Load more',
+      'plan.change.close': 'Close',
+      'plan.change.diffTitle': 'Version {from} → {to}',
+      'plan.change.unavailable': 'This range only has a summary; a full version cannot be rebuilt',
+      'plan.decisionHistory': 'Decision history',
+      'plan.decision.added': 'added',
+      'plan.decision.removed': 'removed',
+      'plan.decision.proposal': 'proposal',
+      'plan.decision.none': 'No decisions yet',
+      'plan.phaseDecisions': 'Phase decisions',
       'plan.parent': 'Parent',
       'plan.resultField': 'Result',
       'plan.completed': 'Completed',
@@ -3334,6 +3358,12 @@ Keep in mind
         const [confirmTests, setConfirmTests] = React.useState({})
         const [confirmApplyId, setConfirmApplyId] = React.useState(null)
         const [showProposalHistory, setShowProposalHistory] = React.useState(false)
+        const [decisions, setDecisions] = React.useState([])
+        const [showDecisions, setShowDecisions] = React.useState(false)
+        const [changeLimit, setChangeLimit] = React.useState(20)
+        const [changeTotal, setChangeTotal] = React.useState(0)
+        const [selectedChange, setSelectedChange] = React.useState(null)
+        const [initialProject, setInitialProject] = React.useState(null)
         const busyRef = React.useRef(false)
         const selectedRef = React.useRef(null)
 
@@ -3373,14 +3403,17 @@ Keep in mind
         const loadDetail = React.useCallback(async (id, silent) => {
           if (silent !== true) setErrorText('')
           try {
-            const [project, proposalList, changeList] = await Promise.all([
+            const [project, proposalList, changeList, decisionList] = await Promise.all([
               call('plan.detail', { id }),
               call('plan.proposal.list', { id }),
-              call('plan.change.list', { id, limit: 50 }),
+              call('plan.change.list', { id, limit: 200 }),
+              call('plan.decision.list', { id, limit: 100 }),
             ])
             setDetail(project.item)
             setProposals(Array.isArray(proposalList.items) ? proposalList.items : [])
             setChanges(Array.isArray(changeList.items) ? changeList.items : [])
+            setChangeTotal(Number.isInteger(changeList.total) ? changeList.total : 0)
+            setDecisions(Array.isArray(decisionList.items) ? decisionList.items : [])
           } catch (error) {
             setErrorText(`${t('plan.load.fail')}: ${errorTextOf(error)}`)
           }
@@ -3436,6 +3469,10 @@ Keep in mind
           setConfirmTests({})
           setConfirmApplyId(null)
           setShowProposalHistory(false)
+          setShowDecisions(false)
+          setChangeLimit(20)
+          setSelectedChange(null)
+          setInitialProject(null)
           setErrorText('')
         }
 
@@ -3573,6 +3610,8 @@ Keep in mind
               confirmTests: confirmTests[proposal.id] === true,
             })
             setConfirmApplyId(null)
+            setSelectedChange(null)
+            setInitialProject(null)
             await reload(detail.id)
           })
         }
@@ -3582,6 +3621,8 @@ Keep in mind
           void run(async () => {
             await call('plan.proposal.reject', { id: proposal.id })
             setConfirmApplyId(null)
+            setSelectedChange(null)
+            setInitialProject(null)
             await reload(detail.id)
           })
         }
@@ -4063,12 +4104,12 @@ Keep in mind
 
         function renderProjectsSections(project) {
           const blocks = []
-          const decisions = (project.decisions ?? []).map((item) => item.text)
+          const decisions = [...new Set((project.decisions ?? []).map((item) => item.text))]
           if (decisions.length > 0) {
             blocks.push(
               h(
                 'div',
-                { className: 'tplan-section', key: 'decisions' },
+                { className: 'tplan-section', key: 'project-decisions' },
                 h('div', { className: 'tplan-sec-head' }, t('plan.decisions')),
                 ...decisions.map((text, index) => h('div', { key: `decision-${index}`, className: 'tplan-goal' }, `- ${text}`)),
               ),
@@ -4079,7 +4120,7 @@ Keep in mind
             blocks.push(
               h(
                 'div',
-                { className: 'tplan-section', key: 'risks' },
+                { className: 'tplan-section', key: 'project-risks' },
                 h('div', { className: 'tplan-sec-head' }, t('plan.risks')),
                 ...risks.map((text, index) => h('div', { key: `risk-${index}`, className: 'tplan-goal' }, `- ${text}`)),
               ),
@@ -4093,7 +4134,7 @@ Keep in mind
             blocks.push(
               h(
                 'div',
-                { className: 'tplan-section', key: 'sources' },
+                { className: 'tplan-section', key: 'project-sources' },
                 h('div', { className: 'tplan-sec-head' }, t('plan.sources')),
                 ...sources.map((text, index) => h('div', { key: `source-${index}`, className: 'tplan-source' }, `- ${text}`)),
               ),
@@ -4102,35 +4143,7 @@ Keep in mind
           return blocks
         }
 
-        function renderProposal(proposal, project) {
-          const stale = proposal.baseVersion !== project.version
-          const confirming = confirmApplyId === proposal.id
-          const actions = h(
-            'div',
-            { className: 'tplan-row' },
-            confirming
-              ? h(
-                  'button',
-                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) },
-                  t('plan.apply.confirm'),
-                )
-              : h(
-                  'button',
-                  { type: 'button', className: 'tplan-action', disabled: busy || stale, onClick: () => setConfirmApplyId(proposal.id) },
-                  t('plan.apply'),
-                ),
-            confirming
-              ? h(
-                  'button',
-                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => setConfirmApplyId(null) },
-                  t('plan.apply.cancel'),
-                )
-              : h(
-                  'button',
-                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) },
-                  t('plan.reject'),
-                ),
-          )
+        function buildDiffLines(diff) {
           const fieldLabel = (field) =>
             ({
               name: t('plan.name'),
@@ -4143,9 +4156,8 @@ Keep in mind
               nextStep: t('plan.next'),
               result: t('plan.resultField'),
             })[field] ?? field
-          const diffLines = []
-          const diff = proposal.diff ?? {}
-          const line = (...segments) => diffLines.push(segments)
+          const lines = []
+          const line = (...segments) => lines.push(segments)
           const plus = (text) => ({ text: `+${text}`, tone: 'add' })
           const minus = (text) => ({ text: `-${text}`, tone: 'del' })
           for (const entry of diff.project ?? []) {
@@ -4195,6 +4207,77 @@ Keep in mind
             if ((diff.sources?.removed ?? []).length > 0) segments.push(minus(diff.sources.removed.join('; ')))
             line(...segments)
           }
+          return lines
+        }
+
+        function renderDiffBlock(diff) {
+          const lines = buildDiffLines(diff ?? {})
+          if (lines.length === 0) return h('div', { className: 'tplan-listline' }, t('plan.diff.none'))
+          return h(
+            'div',
+            null,
+            ...lines.map((segments, index) =>
+              h(
+                'div',
+                { key: `diff-${index}`, className: 'tplan-listline' },
+                ...segments.map((segment, position) =>
+                  h(
+                    'span',
+                    {
+                      key: position,
+                      className:
+                        segment.tone === 'add' ? 'tplan-diff-add' : segment.tone === 'del' ? 'tplan-diff-del' : undefined,
+                    },
+                    segment.text,
+                  ),
+                ),
+              ),
+            ),
+          )
+        }
+
+        function renderProposal(proposal, project) {
+          const stale = proposal.baseVersion !== project.version
+          const confirming = confirmApplyId === proposal.id
+          const actions = h(
+            'div',
+            { className: 'tplan-row' },
+            confirming
+              ? h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) },
+                  t('plan.apply.confirm'),
+                )
+              : h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy || stale, onClick: () => setConfirmApplyId(proposal.id) },
+                  t('plan.apply'),
+                ),
+            confirming
+              ? h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => setConfirmApplyId(null) },
+                  t('plan.apply.cancel'),
+                )
+              : h(
+                  'button',
+                  { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) },
+                  t('plan.reject'),
+                ),
+          )
+          const fieldLabel = (field) =>
+            ({
+              name: t('plan.name'),
+              goal: t('plan.goal'),
+              status: t('plan.status'),
+              currentPhaseId: t('plan.current'),
+              number: t('plan.number'),
+              title: t('plan.title'),
+              parentPid: t('plan.parent'),
+              nextStep: t('plan.next'),
+              result: t('plan.resultField'),
+            })[field] ?? field
+          const renderedDiff = renderDiffBlock(proposal.diff ?? {})
           const byPid = new Map((project.phases ?? []).map((entry) => [entry.pid, entry]))
           const affected = (proposal.affectedPhaseIds ?? [])
             .map((pid) => byPid.get(pid))
@@ -4215,25 +4298,7 @@ Keep in mind
                 { className: 'tplan-sec-head' },
                 `${t(`plan.kind.${proposal.kind}`) ?? proposal.kind}${target === undefined ? '' : ` · ${target.number} ${target.title}`}`,
               ),
-              ...(diffLines.length === 0
-                ? [h('div', { className: 'tplan-listline' }, t('plan.diff.none'))]
-                : diffLines.map((segments, index) =>
-                    h(
-                      'div',
-                      { key: `diff-${index}`, className: 'tplan-listline' },
-                      ...segments.map((segment, position) =>
-                        h(
-                          'span',
-                          {
-                            key: position,
-                            className:
-                              segment.tone === 'add' ? 'tplan-diff-add' : segment.tone === 'del' ? 'tplan-diff-del' : undefined,
-                          },
-                          segment.text,
-                        ),
-                      ),
-                    ),
-                  )),
+              renderedDiff,
               base,
               stale ? h('div', { className: 'tplan-err' }, t('plan.diff.stale')) : null,
               proposal.reason === '' || proposal.reason === undefined ? null : h('div', { className: 'tplan-hint' }, proposal.reason),
@@ -4351,8 +4416,126 @@ Keep in mind
           )
         }
 
+        function openChange(change) {
+          if (detail === null) return
+          if (change.version === 1) {
+            void run(async () => {
+              const result = await call('plan.version.show', { id: detail.id, version: 1 })
+              setInitialProject(result.item)
+              setSelectedChange(null)
+            })
+            return
+          }
+          void run(async () => {
+            const result = await call('plan.change.diff', { id: detail.id, from: change.version - 1, to: change.version })
+            setSelectedChange({
+              fromVersion: result.fromVersion,
+              toVersion: result.toVersion,
+              diff: result.diff,
+            })
+            setInitialProject(null)
+          })
+        }
+
+        function openInitial() {
+          if (detail === null) return
+          void run(async () => {
+            const result = await call('plan.version.show', { id: detail.id, version: 1 })
+            setInitialProject(result.item)
+            setSelectedChange(null)
+          })
+        }
+
+        function openInitialVsCurrent() {
+          if (detail === null) return
+          void run(async () => {
+            const result = await call('plan.change.diff', { id: detail.id, from: 1, to: detail.version })
+            setSelectedChange({
+              fromVersion: result.fromVersion,
+              toVersion: result.toVersion,
+              diff: result.diff,
+            })
+            setInitialProject(null)
+          })
+        }
+
+        function renderInitialProject() {
+          if (initialProject === null) return null
+          return h(
+            'div',
+            { className: 'tplan-preview' },
+            h(
+              'div',
+              { className: 'tplan-sec-head' },
+              `${t('plan.change.initial')} · v1`,
+              h('button', { type: 'button', className: 'tplan-btn', onClick: () => setInitialProject(null) }, t('plan.change.close')),
+            ),
+            ...(initialProject.phases ?? []).map((phase) =>
+              h('div', { key: phase.pid, className: 'tplan-listline' }, `${phase.number} ${phase.title}`),
+            ),
+          )
+        }
+
+        function renderSelectedChange() {
+          if (selectedChange === null) return null
+          return h(
+            'div',
+            { className: 'tplan-preview' },
+            h(
+              'div',
+              { className: 'tplan-sec-head' },
+              fill2(t('plan.change.diffTitle'), { from: selectedChange.fromVersion, to: selectedChange.toVersion }),
+              h('button', { type: 'button', className: 'tplan-btn', onClick: () => setSelectedChange(null) }, t('plan.change.close')),
+            ),
+            renderDiffBlock(selectedChange.diff),
+          )
+        }
+
+        function renderDecisions() {
+          const realDecisions = decisions.filter((item) => item.type === 'change')
+          if (realDecisions.length === 0) return null
+          return h(
+            'div',
+            { className: 'tplan-section', key: 'decision-history' },
+            h(
+              'div',
+              { className: 'tplan-sec-head' },
+              h(
+                'button',
+                { type: 'button', className: 'tplan-btn', onClick: () => setShowDecisions((open) => !open) },
+                `${t('plan.decisionHistory')} (${realDecisions.length})`,
+              ),
+            ),
+            showDecisions
+              ? h(
+                  'div',
+                  null,
+                  ...realDecisions.slice(0, 30).map((item, index) => {
+                    const where = item.scope === 'project' ? t('plan.diff.project') : item.phaseNumber
+                    const action = item.action === 'added' ? t('plan.decision.added') : t('plan.decision.removed')
+                    const field =
+                      item.field === 'risk'
+                        ? t('plan.risks')
+                        : item.scope === 'phase'
+                          ? t('plan.phaseDecisions')
+                          : t('plan.decisions')
+                    return h(
+                      'div',
+                      { key: `decision-${index}`, className: 'tplan-change' },
+                      `v${item.version} · ${where} · ${field} · ${action} · ${item.text}${item.reason ? ` · ${item.reason}` : ''}`,
+                    )
+                  }),
+                )
+              : null,
+          )
+        }
+
         function renderChanges() {
           if (changes.length === 0) return null
+          const visible = changes
+            .slice()
+            .reverse()
+            .slice(0, changeLimit)
           return h(
             'div',
             { className: 'tplan-section', key: 'changes' },
@@ -4362,24 +4545,48 @@ Keep in mind
               h(
                 'button',
                 { type: 'button', className: 'tplan-btn', onClick: () => setShowChanges((open) => !open) },
-                `${t('plan.changes')} (${changes.length})`,
+                `${t('plan.changes')} (${changeTotal})`,
               ),
             ),
             showChanges
               ? h(
                   'div',
                   null,
-                  ...changes
-                    .slice()
-                    .reverse()
-                    .slice(0, 20)
-                    .map((change) =>
-                      h(
-                        'div',
-                        { key: change.id, className: 'tplan-change' },
-                        `${fill2(t('plan.change.v'), { n: change.version })} · ${statusText(t, change.kind, CHANGE_KIND_LABEL)} · ${statusText(t, change.by, CHANGE_BY_LABEL)}${change.reason ? ` · ${change.reason}` : ''} · ${timeAgo(t, change.at)}`,
-                      ),
+                  h(
+                    'div',
+                    { className: 'tplan-row' },
+                    h('button', { type: 'button', className: 'tplan-btn', onClick: openInitial }, t('plan.change.initial')),
+                    h(
+                      'button',
+                      { type: 'button', className: 'tplan-btn', onClick: openInitialVsCurrent },
+                      t('plan.change.initialVsCurrent'),
                     ),
+                  ),
+                  ...visible.map((change) =>
+                    h(
+                      'button',
+                      {
+                        key: change.id,
+                        type: 'button',
+                        className: 'tplan-change',
+                        onClick: () => openChange(change),
+                      },
+                      `${fill2(t('plan.change.v'), { n: change.version })} · ${statusText(t, change.kind, CHANGE_KIND_LABEL)} · ${statusText(t, change.by, CHANGE_BY_LABEL)}${change.reason ? ` · ${change.reason}` : ''} · ${timeAgo(t, change.at)}`,
+                    ),
+                  ),
+                  changes.length > changeLimit
+                    ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'tplan-btn',
+                          onClick: () => setChangeLimit((limit) => limit + 20),
+                        },
+                        t('plan.change.loadMore'),
+                      )
+                    : null,
+                  renderInitialProject(),
+                  renderSelectedChange(),
                 )
               : null,
           )
@@ -4447,6 +4654,7 @@ Keep in mind
             ...renderProjectsSections(project),
             renderProposals(project),
             renderProposalHistory(project),
+            renderDecisions(),
             renderChanges(),
           ]
         }

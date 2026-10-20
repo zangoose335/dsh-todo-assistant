@@ -355,10 +355,16 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     reason: z.string().default(''),
     affectedPhaseIds: z.array(z.string()).default([]),
     /**
-     * `create` stores the whole initial project in `after`; `patch` stores only
-     * the changed top-level fields. Field-level phase diffs are C2's job.
+     * `create` stores the whole initial project in `after` (or `initial`).
+     * C4 changes store only the structured summary in `plan`; legacy records
+     * keep `before`/`after` and stay readable.
      */
-    diff: z.object({ before: z.unknown().optional(), after: z.unknown().optional() }),
+    diff: z.object({
+      before: z.unknown().optional(),
+      after: z.unknown().optional(),
+      plan: z.unknown().optional(),
+      initial: z.unknown().optional(),
+    }),
     sourceIds: z.array(z.string()).default([]),
   })
 

@@ -631,6 +631,8 @@ export function createStore(domain, options = {}) {
       const next = applyProjectPatch(current, patch, at, { limits })
       const changed = changedProjectFields(current, next)
       if (changed.length === 0) return { project: current, change: undefined }
+      const planDiff = diffPlans(current, next)
+      const impacted = affectedPhaseIds(current, next, planDiff)
       const existing = store.changeCount(id)
       if (existing >= limits.changes) {
         throw new TodoInputError('plan/change-limit', `计划变更记录已达上限 ${limits.changes} 条；先归档或新建项目`)
@@ -644,10 +646,10 @@ export function createStore(domain, options = {}) {
         by: options.by === 'proposal' || options.by === 'system' ? options.by : 'developer',
         kind: CHANGE_KINDS.includes(options.kind) ? options.kind : 'patch',
         reason: planReason(options.reason, limits.changeReason),
-        affectedPhaseIds: Array.isArray(options.affectedPhaseIds)
-          ? [...new Set(options.affectedPhaseIds.filter((pid) => typeof pid === 'string' && pid.trim() !== ''))].slice(0, limits.phases)
-          : [],
-        diff: { before: fieldMap(current, changed), after: fieldMap(next, changed) },
+        affectedPhaseIds: impacted,
+        // Summary-only (C4): the human diff, not full field copies except the
+        // initial plan on create. `affectedPhaseIds` is computed from the diff.
+        diff: { plan: planDiff },
         sourceIds: Array.isArray(options.sourceIds)
           ? [...new Set(options.sourceIds.filter((sid) => typeof sid === 'string' && sid.trim() !== ''))].slice(0, SOURCE_LIMIT)
           : [],
@@ -1115,13 +1117,219 @@ export function createStore(domain, options = {}) {
       return next
     },
 
-    /** One project's changes, oldest version first. */
-    changesFor(projectId, limit) {
+    /** One project's changes, oldest version first, with offset pagination. */
+    changesFor(projectId, limit, offset) {
       const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, limits.changes) : 50
+      const start = Number.isInteger(offset) && offset > 0 ? Math.min(offset, limits.changes) : 0
       const items = []
       for (const [, record] of changesTable.entries()) if (record.projectId === projectId) items.push(record)
       items.sort((left, right) => left.version - right.version || left.at - right.at || left.id.localeCompare(right.id))
-      return { items: items.slice(0, cap), total: items.length }
+      const page = items.slice(start, start + cap)
+      return { items: page, total: items.length, offset: start, limit: cap, nextOffset: start + page.length }
+    },
+
+    /** The full initial project snapshot stored on the create change. */
+    initialProject(projectId) {
+      const create = [...changesTable.entries()]
+        .map(([, change]) => change)
+        .filter((change) => change.projectId === projectId && change.version === 1 && change.kind === 'create')
+        .sort((left, right) => left.version - right.version)[0]
+      const raw = create?.diff?.initial ?? create?.diff?.after
+      if (raw === null || typeof raw !== 'object' || !Array.isArray(raw.phases)) return undefined
+      return { ...raw, version: 1 }
+    },
+
+    /** One change record by version. */
+    changeAt(projectId, version) {
+      for (const [, change] of changesTable.entries()) {
+        if (change.projectId === projectId && change.version === version) return change
+      }
+      return undefined
+    },
+
+    /**
+     * Rebuild a legacy (pre-C4) version from its stored changed-field values.
+     * Summary-only changes cannot be replayed, so a mix returns undefined.
+     */
+    legacyState(projectId, targetVersion) {
+      const initial = store.initialProject(projectId)
+      if (initial === undefined) return undefined
+      let state = { ...initial }
+      const changes = [...changesTable.entries()]
+        .map(([, change]) => change)
+        .filter((change) => change.projectId === projectId && change.version > 1 && change.version <= targetVersion)
+        .sort((left, right) => left.version - right.version)
+      for (const change of changes) {
+        if (change.diff?.plan !== undefined) return undefined
+        if (change.diff?.after === undefined) return undefined
+        state = { ...state, ...change.diff.after, version: change.version }
+      }
+      return state
+    },
+
+    /** The structured summary for one change: stored, or computed for legacy. */
+    changePlan(projectId, change) {
+      if (change?.diff?.plan !== undefined) return change.diff.plan
+      if (change === undefined || change.version <= 1) return undefined
+      const before = store.legacyState(projectId, change.version - 1)
+      const after = store.legacyState(projectId, change.version)
+      if (before === undefined || after === undefined) return undefined
+      return diffPlans(before, after)
+    },
+
+    /**
+     * A diff view. Only two ranges are supported by the summary-only history:
+     * initial→current and one consecutive change. Other ranges need full
+     * snapshots, which C4 deliberately does not store.
+     */
+    changeDiff(projectId, from, to) {
+      const project = requireProject(projectsTable.get(projectId))
+      const target = Number.isInteger(to) ? to : project.version
+      const source = Number.isInteger(from) ? from : Math.max(1, target - 1)
+      if (target < 1 || target > project.version || source < 1 || source > target) {
+        throw new TodoInputError('plan/invalid-range', `版本范围 ${source}→${target} 不合法（当前 ${project.version}）`)
+      }
+      if (source === target) {
+        return { fromVersion: source, toVersion: target, diff: diffPlans(project, project), source: 'empty' }
+      }
+      if (source === 1 && target === project.version) {
+        const initial = store.initialProject(projectId)
+        if (initial === undefined) throw new TodoInputError('plan/replay-unavailable', '找不到初始计划快照')
+        return { fromVersion: 1, toVersion: target, diff: diffPlans(initial, project), source: 'initial' }
+      }
+      if (target === source + 1) {
+        const change = store.changeAt(projectId, target)
+        if (change === undefined) throw new TodoInputError('plan/change-not-found', `第 ${target} 版没有变更记录`)
+        const plan = store.changePlan(projectId, change)
+        if (plan === undefined) {
+          throw new TodoInputError(
+            'plan/replay-unavailable',
+            '历史只保存摘要，无法重放这一段；可查看该版变更前后的摘要或“初始 vs 当前”',
+          )
+        }
+        return {
+          fromVersion: source,
+          toVersion: target,
+          diff: plan,
+          source: change.diff?.plan === undefined ? 'computed' : 'stored',
+        }
+      }
+      throw new TodoInputError(
+        'plan/replay-unavailable',
+        '历史只保存摘要，不能重建任意中间版本；支持初始→当前和单条变更',
+      )
+    },
+
+    /** Initial (v1) or current project detail; other versions are unavailable. */
+    versionShow(projectId, version) {
+      const project = requireProject(projectsTable.get(projectId))
+      if (version === project.version) {
+        return { item: store.projectDetail(project), version, available: true }
+      }
+      if (version === 1) {
+        const initial = store.initialProject(projectId)
+        if (initial === undefined) throw new TodoInputError('plan/version-unavailable', '找不到初始计划快照')
+        return { item: projectPlanFull(initial, { pendingProposalCount: 0 }), version, available: true }
+      }
+      throw new TodoInputError(
+        'plan/version-unavailable',
+        '历史只保存摘要，只能查看初始版和当前版；其他版本可看单条变更的 diff',
+      )
+    },
+
+    /** A merged decision timeline: decision/risk deltas plus proposal outcomes. */
+    decisionTimeline(projectId, { limit = 20, offset = 0 } = {}) {
+      const project = requireProject(projectsTable.get(projectId))
+      const items = []
+      const initial = store.initialProject(projectId)
+      if (initial !== undefined) {
+        const create = store.changeAt(projectId, 1)
+        for (const decision of initial.decisions ?? []) {
+          items.push({
+            type: 'change',
+            version: 1,
+            at: create?.at ?? initial.createdAt,
+            by: 'developer',
+            kind: 'create',
+            reason: '',
+            scope: 'project',
+            field: 'decision',
+            action: 'added',
+            text: decision.text,
+            sourceIds: [],
+          })
+        }
+        for (const risk of initial.risks ?? []) {
+          items.push({
+            type: 'change',
+            version: 1,
+            at: create?.at ?? initial.createdAt,
+            by: 'developer',
+            kind: 'create',
+            reason: '',
+            scope: 'project',
+            field: 'risk',
+            action: 'added',
+            text: risk.text,
+            sourceIds: [],
+          })
+        }
+      }
+      const changes = [...changesTable.entries()]
+        .map(([, change]) => change)
+        .filter((change) => change.projectId === projectId && change.version > 1)
+        .sort((left, right) => left.version - right.version)
+      for (const change of changes) {
+        const plan = store.changePlan(projectId, change)
+        if (plan === undefined) continue
+        for (const field of ['decisions', 'risks']) {
+          const delta = plan[field] ?? {}
+          for (const action of ['added', 'removed']) {
+            for (const text of delta[action] ?? []) {
+              items.push({
+                type: 'change',
+                version: change.version,
+                at: change.at,
+                by: change.by,
+                kind: change.kind,
+                reason: change.reason,
+                scope: 'project',
+                field: field === 'decisions' ? 'decision' : 'risk',
+                action,
+                text,
+                sourceIds: change.sourceIds ?? [],
+              })
+            }
+          }
+        }
+        for (const entry of plan.acceptance ?? []) {
+          if (entry.field !== 'decisions') continue
+          for (const action of ['added', 'removed']) {
+            for (const text of entry[action] ?? []) {
+              items.push({
+                type: 'change',
+                version: change.version,
+                at: change.at,
+                by: change.by,
+                kind: change.kind,
+                reason: change.reason,
+                scope: 'phase',
+                phaseId: entry.pid,
+                phaseNumber: entry.number,
+                phaseTitle: entry.title,
+                field: 'decision',
+                action,
+                text,
+                sourceIds: change.sourceIds ?? [],
+              })
+            }
+          }
+        }
+      }
+      items.sort((left, right) => right.at - left.at || (right.version ?? 0) - (left.version ?? 0))
+      const start = Number.isInteger(offset) && offset > 0 ? offset : 0
+      const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 20
+      return { items: items.slice(start, start + cap), total: items.length, offset: start, nextOffset: start + cap }
     },
 
     /**
@@ -1130,10 +1338,22 @@ export function createStore(domain, options = {}) {
      * @param id - project id.
      * @returns the full project plus its change history.
      */
-    exportProject(id) {
+    exportProject(id, { includeDiff = false } = {}) {
       const project = requireProject(projectsTable.get(id))
       const { items } = store.changesFor(id, limits.changes)
-      return { project: store.projectDetail(project), changes: items }
+      return {
+        project: store.projectDetail(project),
+        changes: items.map((change) => ({
+          version: change.version,
+          at: change.at,
+          by: change.by,
+          kind: change.kind,
+          reason: change.reason,
+          affectedPhaseIds: change.affectedPhaseIds ?? [],
+          sourceIds: change.sourceIds ?? [],
+          ...(includeDiff ? { diff: change.diff } : {}),
+        })),
+      }
     },
   }
 
@@ -1153,6 +1373,18 @@ export function createStore(domain, options = {}) {
  *   INBOX.
  * @returns `{ handle(endpoint, payload) }` answering wire results.
  */
+function changeSummaryMarkdown(changes) {
+  const lines = ['## 变更摘要', '']
+  if (!Array.isArray(changes) || changes.length === 0) {
+    lines.push('- 无')
+  } else {
+    for (const change of changes) {
+      lines.push(`- v${change.version} · ${change.kind} · ${change.by}${change.reason ? ` · ${change.reason}` : ''}`)
+    }
+  }
+  return lines.join('\n')
+}
+
 export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveSessionWorkspace, writePlanFile }) {
   const endpointMap = {
     /**
@@ -1412,8 +1644,27 @@ export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveS
     /** One project's applied changes, oldest version first (`limit` optional). */
     async 'plan.change.list'(payload) {
       const id = resolveProject(store, payload)
-      const { items, total } = store.changesFor(id, payload?.limit)
-      return { items, total }
+      return { id, ...store.changesFor(id, payload?.limit, payload?.offset) }
+    },
+
+    /** A diff for one consecutive change, or initial→current. */
+    async 'plan.change.diff'(payload) {
+      const id = resolveProject(store, payload)
+      return { id, ...store.changeDiff(id, payload?.from, payload?.to) }
+    },
+
+    /** The initial snapshot or the current project (other versions unavailable). */
+    async 'plan.version.show'(payload) {
+      const id = resolveProject(store, payload)
+      const record = store.getProject(id)
+      const version = Number.isInteger(payload?.version) ? payload.version : record.version
+      return { id, ...store.versionShow(id, version) }
+    },
+
+    /** Decision/risk deltas plus applied/rejected proposal outcomes. */
+    async 'plan.decision.list'(payload) {
+      const id = resolveProject(store, payload)
+      return { id, ...store.decisionTimeline(id, { limit: payload?.limit, offset: payload?.offset }) }
     },
 
     // ── Markdown import/export (B3) ─────────────────────────────────────────
@@ -1467,13 +1718,13 @@ export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveS
     async 'plan.export'(payload) {
       const id = resolveProject(store, payload)
       const format = payload?.format === undefined ? 'json' : payload.format
-      if (format === 'json') return store.exportProject(id)
+      if (format === 'json') return store.exportProject(id, { includeDiff: payload?.includeDiff === true })
       if (format !== 'markdown') {
         throw new TodoInputError('plan/invalid-export-format', "format 必须是 'json' 或 'markdown'")
       }
       const record = store.getProject(id)
       const project = store.projectDetail(record)
-      const markdown = renderPlanMarkdown(project)
+      const markdown = `${renderPlanMarkdown(project)}\n\n${changeSummaryMarkdown(store.exportProject(id).changes)}\n`
       if (payload?.write === true) {
         if (typeof writePlanFile !== 'function') {
           throw new TodoInputError('plan/export-unavailable', '当前环境不能写文件')

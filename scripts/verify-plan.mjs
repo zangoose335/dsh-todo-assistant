@@ -186,7 +186,7 @@ async function main() {
     checkEqual('another workspace sees nothing', (await call(api, 'plan.list', { workspace: '/tmp/other' })).total, 0)
     checkEqual('all:true sees every workspace', (await call(api, 'plan.list', { all: true })).total, 1)
 
-    const exportedAfterCreate = await call(api, 'plan.export', { id: projectId })
+    const exportedAfterCreate = await call(api, 'plan.export', { id: projectId, includeDiff: true })
     checkEqual(
       'create records the initial change',
       [exportedAfterCreate.changes.length, exportedAfterCreate.changes[0].kind, exportedAfterCreate.changes[0].version],
@@ -205,9 +205,10 @@ async function main() {
     })
     checkEqual('patch bumps version and resolves the current phase', [patched.item.version, patched.item.currentPhaseNumber], [2, '1'])
     checkEqual('patch appends a change', [patched.change.kind, patched.change.version, patched.change.reason], ['patch', 2, '调整目标'])
+    const goalDiff = patched.change.diff.plan.project.find((entry) => entry.field === 'goal')
     checkEqual(
-      'diff stores before/after for changed fields only',
-      [patched.change.diff.before.goal, patched.change.diff.after.goal, 'name' in patched.change.diff.before],
+      'the summary diff stores the changed field only',
+      [goalDiff?.before, goalDiff?.after, patched.change.diff.plan.project.some((entry) => entry.field === 'name')],
       ['引入 Project Plan 数据模型、存储表和 API 投影', '新的总体目标', false],
     )
     await expectCode('a stale patch is rejected', api, 'plan.patch', { id: projectId, baseVersion: 1, patch: { goal: 'x' } }, 'plan/stale')
