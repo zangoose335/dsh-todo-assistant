@@ -24,12 +24,15 @@ import { createDetector } from './detect.js'
 import { createMarkerQueue, messageText } from './marker.js'
 import { INBOX, createTodoSpec } from './domain.js'
 import { readCodeCoordinates } from './git.js'
+import { writePlanMarkdown } from './plan-export.js'
 import { recallApprovalDecision } from './approval.js'
 import { createRecall } from './recall.js'
 import {
   createTodoAddTool,
   createTodoListTool,
   createTodoNoteTool,
+  createTodoPlanContextTool,
+  createTodoPlanReadTool,
   createTodoReadTool,
   createTodoRecallTool,
   createTodoStatusTool,
@@ -90,6 +93,7 @@ export async function apply(ctx) {
   const markers = createMarkerQueue()
   const api = createApi({
     store,
+    writePlanFile: writePlanMarkdown,
     hitIds: (sessionId) => detector.hitIds(sessionId),
     resolveRoot,
     resolveSessionWorkspace: async (sessionId) => {
@@ -211,6 +215,8 @@ export async function apply(ctx) {
     createTodoReadTool({ defineTool, store }),
     createTodoNoteTool({ defineTool, store }),
     createTodoListTool({ defineTool, store, resolveWorkspace }),
+    createTodoPlanReadTool({ defineTool, store, resolveWorkspace }),
+    createTodoPlanContextTool({ defineTool, store }),
     createTodoRecallTool({ defineTool, store, recall }),
     createTodoStatusTool({ defineTool, store }),
   ]

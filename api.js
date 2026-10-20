@@ -11,16 +11,34 @@
  *   result   `{ ok: true, value }` or `{ ok: false, error: { code, message, details } }`
  */
 import { BRIEF_BASES } from './brief.js'
+import { importPreviewToProjectInput, parsePlanMarkdown, renderPlanMarkdown } from './plan-markdown.js'
 import {
+  CHANGE_KINDS,
   INBOX,
   NOTE_KINDS,
+  PLAN_LIMITS,
+  PROPOSAL_KINDS,
+  PROPOSAL_STATUSES,
   SOURCE_LIMIT,
   TodoInputError,
+  addPhaseToProject,
   applyPatch,
+  applyProjectPatch,
+  buildPhaseContextPack,
+  buildProject,
   buildRecord,
   mintId,
+  mintPlanId,
+  movePhaseInProject,
   projectFull,
   projectL0,
+  projectPlanFull,
+  projectPlanL0,
+  recordPhaseResultInProject,
+  removePhaseFromProject,
+  setPhaseStatusInProject,
+  splitPhaseInProject,
+  updatePhaseInProject,
 } from './domain.js'
 
 /** Absolute logical RPC channel; the browser calls it through `ctx.connection.rpc`. */
@@ -120,15 +138,95 @@ function nextActionWarnings(nextStep, brief) {
   return []
 }
 
+// ── Project Plan (B1) helpers ────────────────────────────────────────────────
+
+/** Top-level project fields a change compares, in a stable order. */
+const PROJECT_CHANGE_FIELDS = ['name', 'goal', 'status', 'currentPhaseId', 'phases', 'decisions', 'risks', 'sources']
+
+/** The fields whose value differs between two project records. */
+function changedProjectFields(before, after) {
+  return PROJECT_CHANGE_FIELDS.filter(
+    (field) => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null),
+  )
+}
+
+/** A JSON-safe `{ field: value }` map; an absent field is stored as `null`. */
+function fieldMap(record, fields) {
+  const map = {}
+  for (const field of fields) map[field] = record[field] === undefined ? null : record[field]
+  return map
+}
+
+/** Normalize a session origin for a project (the same shape as a card's). */
+function normalizeProjectOrigin(input, at) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim().slice(0, 256) : ''
+  if (sessionId === '') return undefined
+  const seqRange =
+    Array.isArray(input.seqRange) && input.seqRange.length === 2 && input.seqRange.every(Number.isInteger)
+      ? [input.seqRange[0], input.seqRange[1]]
+      : [0, 0]
+  return {
+    sessionId,
+    turn: Number.isInteger(input.turn) ? Math.max(0, input.turn) : 0,
+    seqRange,
+    cwd: typeof input.cwd === 'string' ? input.cwd : '',
+    at: Number.isInteger(input.at) ? input.at : at,
+  }
+}
+
+/** Trim one plan reason; over the limit rejects instead of truncating. */
+function planReason(value, limit) {
+  if (typeof value !== 'string') return ''
+  const text = value.trim()
+  const length = [...text].length
+  if (length > limit) throw new TodoInputError('plan/reason-too-long', `reason 最多 ${limit} 个字符（当前 ${length}）`)
+  return text
+}
+
+/** A stored project, or a `plan/not-found` rejection. */
+function requireProject(value) {
+  if (value === undefined) throw new TodoInputError('plan/not-found', '计划不存在，可能已被删除')
+  return value
+}
+
+/** A stored proposal, or a `plan/not-found` rejection. */
+function requireProposal(value) {
+  if (value === undefined) throw new TodoInputError('plan/not-found', '提议不存在，可能已被删除')
+  return value
+}
+
+/** Resolve `{ id }` to a stored project id. */
+function resolveProject(store, payload) {
+  const ref = typeof payload?.id === 'string' ? payload.id.trim() : ''
+  if (ref === '') throw new TodoInputError('plan/id-required', 'id 不能为空')
+  const record = store.findProject(ref)
+  if (record === undefined) throw new TodoInputError('plan/not-found', `计划 ${ref} 不存在`)
+  return record.id
+}
+
+/** Resolve `{ id }` to a stored proposal id. */
+function resolveProposal(store, payload) {
+  const ref = typeof payload?.id === 'string' ? payload.id.trim() : ''
+  if (ref === '') throw new TodoInputError('plan/id-required', '提议 id 不能为空')
+  if (store.getProposal(ref) === undefined) throw new TodoInputError('plan/not-found', `提议 ${ref} 不存在`)
+  return ref
+}
+
 /**
  * Open a typed view over the `todos` table.
  *
  * @param domain - the opened `todo-assistant` domain handle.
+ * @param options - optional test seam: `limits` overrides {@link PLAN_LIMITS}.
  * @returns store operations shared by the RPC surface (and, later, the tools).
  */
-export function createStore(domain) {
+export function createStore(domain, options = {}) {
   const table = domain.table('todos')
   const rulesTable = domain.table('rules')
+  const projectsTable = domain.table('projects')
+  const proposalsTable = domain.table('plan_proposals')
+  const changesTable = domain.table('plan_changes')
+  const limits = { ...PLAN_LIMITS, ...(options?.limits ?? {}) }
 
   /**
    * Allocate the label of a new card: same root session reuses its major and
@@ -378,6 +476,418 @@ export function createStore(domain) {
       await table.put(id, next)
       return next
     },
+
+    // ── Project Plan (B1) ───────────────────────────────────────────────────
+
+    /** Every stored project, newest change first. */
+    allProjects() {
+      const items = []
+      for (const [, record] of projectsTable.entries()) items.push(record)
+      items.sort(
+        (left, right) => right.updatedAt - left.updatedAt || right.createdAt - left.createdAt || left.id.localeCompare(right.id),
+      )
+      return items
+    },
+
+    /** One project by id, or undefined. */
+    getProject(id) {
+      return projectsTable.get(id)
+    },
+
+    /** Resolve a project id (projects carry no display number). */
+    findProject(ref) {
+      const text = typeof ref === 'string' ? ref.trim() : ''
+      return text === '' ? undefined : projectsTable.get(text)
+    },
+
+    /** One stored proposal, or undefined. */
+    getProposal(id) {
+      return proposalsTable.get(id)
+    },
+
+    /** How many pending proposals one project has. */
+    pendingProposalCount(projectId) {
+      let count = 0
+      for (const [, record] of proposalsTable.entries()) {
+        if (record.projectId === projectId && record.status === 'pending') count += 1
+      }
+      return count
+    },
+
+    /** The project list projection, with its pending-proposal count. */
+    projectRow(record) {
+      return projectPlanL0(record, { pendingProposalCount: store.pendingProposalCount(record.id) })
+    },
+
+    /** The full project projection, with its pending-proposal count. */
+    projectDetail(record) {
+      return projectPlanFull(record, { pendingProposalCount: store.pendingProposalCount(record.id) })
+    },
+
+    /**
+     * The phase handoff pack (B4): structured fields, source pointers, the
+     * workspace rules, and the pending-proposal count. Read-only.
+     *
+     * @param projectId - project id.
+     * @param phaseId - phase pid; omitted uses the project's current phase.
+     * @returns the pack.
+     */
+    planContext(projectId, phaseId) {
+      const project = requireProject(projectsTable.get(projectId))
+      const pack = buildPhaseContextPack(project, phaseId)
+      pack.pendingProposalCount = store.pendingProposalCount(project.id)
+      pack.rules = store.getRules(project.workspace).text
+      return pack
+    },
+
+    /**
+     * Create one project (version 1) and record its `create` change.
+     *
+     * @param input - untrusted create payload.
+     * @param at - write timestamp.
+     * @returns the stored project and its initial change.
+     */
+    async createProject(input, at) {
+      const project = buildProject(input, {
+        now: () => at,
+        nextId: () => mintPlanId('pj', (id) => projectsTable.get(id) !== undefined),
+        // Phase pids only need to be unique inside the project; duplicates in the
+        // payload are rejected by buildProject.
+        phaseId: () => mintPlanId('ph', () => false),
+        origin: normalizeProjectOrigin(input?.origin, at),
+        limits,
+      })
+      await projectsTable.put(project.id, project)
+      const change = {
+        id: mintPlanId('pc', (id) => changesTable.get(id) !== undefined),
+        projectId: project.id,
+        version: project.version,
+        at,
+        by: 'developer',
+        kind: 'create',
+        reason: '',
+        affectedPhaseIds: [],
+        diff: { before: null, after: { ...project } },
+        sourceIds: [],
+      }
+      await changesTable.put(change.id, change)
+      return { project, change }
+    },
+
+    /**
+     * The single write path for a stored project (PLAN.md §B1 item 2).
+     *
+     * @param id - project id.
+     * @param patch - project-level patch.
+     * @param options - timestamp, actor, kind, reason, ids, and the optional
+     *   `baseVersion` (a mismatch rejects with `plan/stale`).
+     * @returns the stored project and the appended change (none if nothing changed).
+     */
+    async applyChange(id, patch, options = {}) {
+      const current = requireProject(projectsTable.get(id))
+      const at = Number.isInteger(options.at) ? options.at : now()
+      if (Number.isInteger(options.baseVersion) && options.baseVersion !== current.version) {
+        throw new TodoInputError(
+          'plan/stale',
+          `计划已更新（当前版本 ${current.version}，提议基于 ${options.baseVersion}）；请重新读取 plan.detail 后再应用`,
+        )
+      }
+      const next = applyProjectPatch(current, patch, at, { limits })
+      const changed = changedProjectFields(current, next)
+      if (changed.length === 0) return { project: current, change: undefined }
+      const existing = store.changeCount(id)
+      if (existing >= limits.changes) {
+        throw new TodoInputError('plan/change-limit', `计划变更记录已达上限 ${limits.changes} 条；先归档或新建项目`)
+      }
+      const version = current.version + 1
+      const change = {
+        id: mintPlanId('pc', (candidate) => changesTable.get(candidate) !== undefined),
+        projectId: id,
+        version,
+        at,
+        by: options.by === 'proposal' || options.by === 'system' ? options.by : 'developer',
+        kind: CHANGE_KINDS.includes(options.kind) ? options.kind : 'patch',
+        reason: planReason(options.reason, limits.changeReason),
+        affectedPhaseIds: Array.isArray(options.affectedPhaseIds)
+          ? [...new Set(options.affectedPhaseIds.filter((pid) => typeof pid === 'string' && pid.trim() !== ''))].slice(0, limits.phases)
+          : [],
+        diff: { before: fieldMap(current, changed), after: fieldMap(next, changed) },
+        sourceIds: Array.isArray(options.sourceIds)
+          ? [...new Set(options.sourceIds.filter((sid) => typeof sid === 'string' && sid.trim() !== ''))].slice(0, SOURCE_LIMIT)
+          : [],
+      }
+      const updated = { ...next, version }
+      await projectsTable.put(id, updated)
+      await changesTable.put(change.id, change)
+      return { project: updated, change }
+    },
+
+    // ── Phase operations (B2) ───────────────────────────────────────────────
+
+    /** Append one phase to a project. */
+    async addPhase(projectId, input, at) {
+      const current = requireProject(projectsTable.get(projectId))
+      const { patch, affectedPhaseIds } = addPhaseToProject(current, input, at, {
+        phaseId: () => mintPlanId('ph', () => false),
+        limits,
+      })
+      return await store.applyChange(projectId, patch, { at, kind: 'phase-add', affectedPhaseIds, reason: input?.reason })
+    },
+
+    /** Edit one phase's fields. */
+    async updatePhase(projectId, phaseId, patch, at, reason) {
+      const current = requireProject(projectsTable.get(projectId))
+      const result = updatePhaseInProject(current, phaseId, patch, at, { limits })
+      return await store.applyChange(projectId, result.patch, {
+        at,
+        kind: 'phase-update',
+        affectedPhaseIds: result.affectedPhaseIds,
+        reason,
+      })
+    },
+
+    /** Remove one phase (rejects dependents and children; clears current). */
+    async removePhase(projectId, phaseId, at, reason) {
+      const current = requireProject(projectsTable.get(projectId))
+      const result = removePhaseFromProject(current, phaseId, at, { limits })
+      return await store.applyChange(projectId, result.patch, {
+        at,
+        kind: 'phase-remove',
+        affectedPhaseIds: result.affectedPhaseIds,
+        reason,
+      })
+    },
+
+    /** Split one phase into children (`4` → `4a/4b/4c`). */
+    async splitPhase(projectId, phaseId, children, at, reason) {
+      const current = requireProject(projectsTable.get(projectId))
+      const result = splitPhaseInProject(current, phaseId, children, at, {
+        phaseId: () => mintPlanId('ph', () => false),
+        limits,
+      })
+      return await store.applyChange(projectId, result.patch, {
+        at,
+        kind: 'phase-split',
+        affectedPhaseIds: result.affectedPhaseIds,
+        reason,
+      })
+    },
+
+    /** Reorder one phase within its parent group (numbers do not change). */
+    async movePhase(projectId, phaseId, input, at, reason) {
+      const current = requireProject(projectsTable.get(projectId))
+      const result = movePhaseInProject(current, phaseId, input, at, { limits })
+      return await store.applyChange(projectId, result.patch, {
+        at,
+        kind: 'phase-move',
+        affectedPhaseIds: result.affectedPhaseIds,
+        reason,
+      })
+    },
+
+    /** Change one phase's status (`split` and split parents are rejected). */
+    async setPhaseStatus(projectId, phaseId, status, at, reason) {
+      const current = requireProject(projectsTable.get(projectId))
+      const result = setPhaseStatusInProject(current, phaseId, status, at, { limits })
+      return await store.applyChange(projectId, result.patch, {
+        at,
+        kind: 'phase-status',
+        affectedPhaseIds: result.affectedPhaseIds,
+        reason,
+      })
+    },
+
+    /** Record (or replace) one phase's result; the status is untouched. */
+    async recordPhaseResult(projectId, phaseId, result, sessionId, at, reason) {
+      const current = requireProject(projectsTable.get(projectId))
+      const resultInput =
+        result !== null &&
+        typeof result === 'object' &&
+        !Array.isArray(result) &&
+        typeof result.recordedBySession !== 'string' &&
+        typeof sessionId === 'string' &&
+        sessionId !== ''
+          ? { ...result, recordedBySession: sessionId }
+          : result
+      const applied = recordPhaseResultInProject(current, phaseId, resultInput, at, { limits })
+      return await store.applyChange(projectId, applied.patch, {
+        at,
+        kind: 'phase-result',
+        affectedPhaseIds: applied.affectedPhaseIds,
+        reason,
+      })
+    },
+
+    /**
+     * Delete a project and every proposal/change that belongs to it. Cards that
+     * point at it keep their (now dangling) weak link.
+     *
+     * @param id - project id.
+     * @returns the removed project and the cascade counts.
+     */
+    async removeProject(id) {
+      const current = requireProject(projectsTable.get(id))
+      let proposals = 0
+      let changes = 0
+      for (const [key, record] of proposalsTable.entries()) {
+        if (record.projectId !== id) continue
+        await proposalsTable.delete(key)
+        proposals += 1
+      }
+      for (const [key, record] of changesTable.entries()) {
+        if (record.projectId !== id) continue
+        await changesTable.delete(key)
+        changes += 1
+      }
+      await projectsTable.delete(id)
+      return { project: current, proposals, changes }
+    },
+
+    /** How many changes one project has recorded. */
+    changeCount(projectId) {
+      let count = 0
+      for (const [, record] of changesTable.entries()) if (record.projectId === projectId) count += 1
+      return count
+    },
+
+    /** How many proposals one project has (optionally in one status). */
+    proposalCount(projectId, status) {
+      let count = 0
+      for (const [, record] of proposalsTable.entries()) {
+        if (record.projectId !== projectId) continue
+        if (status !== undefined && record.status !== status) continue
+        count += 1
+      }
+      return count
+    },
+
+    /** Proposals for one project, newest first. */
+    proposalsFor(projectId, status) {
+      const items = []
+      for (const [, record] of proposalsTable.entries()) {
+        if (record.projectId !== projectId) continue
+        if (status !== undefined && record.status !== status) continue
+        items.push(record)
+      }
+      items.sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id))
+      return items
+    },
+
+    /**
+     * Record a `project-patch` proposal. The patch is dry-run against the current
+     * project first, so a proposal that could never apply is never stored; the
+     * project itself is not touched. C3's `todo_plan_propose` tool will call this.
+     *
+     * @param input - `{ projectId, baseVersion, kind?, patch, reason?, proposedBySession? }`.
+     * @param at - write timestamp.
+     * @returns the stored proposal.
+     */
+    async addProposal(input, at) {
+      const projectId = typeof input?.projectId === 'string' ? input.projectId.trim() : ''
+      const project = requireProject(projectsTable.get(projectId))
+      if (!Number.isInteger(input?.baseVersion) || input.baseVersion < 1) {
+        throw new TodoInputError('plan/base-version-required', 'baseVersion 必须是正整数（先读 plan.detail）')
+      }
+      const kind = input?.kind === undefined ? 'project-patch' : input.kind
+      if (!PROPOSAL_KINDS.includes(kind)) {
+        throw new TodoInputError('plan/invalid-kind', `kind 必须是 ${PROPOSAL_KINDS.join(' / ')}`)
+      }
+      // Validates the patch against the current project without writing anything.
+      applyProjectPatch(project, input?.patch, at, { limits })
+      if (store.proposalCount(projectId) >= limits.proposals) {
+        throw new TodoInputError('plan/proposal-limit', `提议已达上限 ${limits.proposals} 条`)
+      }
+      if (store.proposalCount(projectId, 'pending') >= limits.pendingProposals) {
+        throw new TodoInputError('plan/pending-proposal-limit', `待处理提议已达上限 ${limits.pendingProposals} 条；先应用或拒绝`)
+      }
+      const proposal = {
+        id: mintPlanId('pp', (id) => proposalsTable.get(id) !== undefined),
+        projectId,
+        baseVersion: input.baseVersion,
+        kind,
+        patch: { ...input.patch },
+        reason: planReason(input?.reason, limits.proposalReason),
+        proposedBySession:
+          typeof input?.proposedBySession === 'string' ? input.proposedBySession.trim().slice(0, 256) : '',
+        status: 'pending',
+        createdAt: at,
+      }
+      await proposalsTable.put(proposal.id, proposal)
+      return proposal
+    },
+
+    /**
+     * Apply a pending proposal: version + change, then mark it applied. A stale
+     * `baseVersion` rejects before anything is written.
+     *
+     * @param id - proposal id.
+     * @param at - write timestamp.
+     * @returns the stored project, the change, and the updated proposal.
+     */
+    async applyProposal(id, at) {
+      const proposal = requireProposal(proposalsTable.get(id))
+      if (proposal.status !== 'pending') {
+        throw new TodoInputError('plan/proposal-not-pending', `提议状态是 ${proposal.status}，只有 pending 可以应用`)
+      }
+      const project = requireProject(projectsTable.get(proposal.projectId))
+      if (proposal.baseVersion !== project.version) {
+        throw new TodoInputError(
+          'plan/stale',
+          `提议基于版本 ${proposal.baseVersion}，计划已是 ${project.version}；请重新读取 plan.detail 后重新提议`,
+        )
+      }
+      const { project: updated, change } = await store.applyChange(project.id, proposal.patch, {
+        at,
+        by: 'proposal',
+        baseVersion: proposal.baseVersion,
+        reason: proposal.reason,
+        sourceIds: [],
+      })
+      const applied = { ...proposal, status: 'applied', appliedAt: at }
+      await proposalsTable.put(id, applied)
+      return { project: updated, change, proposal: applied }
+    },
+
+    /**
+     * Reject a pending proposal; the project is untouched.
+     *
+     * @param id - proposal id.
+     * @param reason - why it was rejected (optional).
+     * @param at - write timestamp.
+     * @returns the updated proposal.
+     */
+    async rejectProposal(id, reason, at) {
+      const proposal = requireProposal(proposalsTable.get(id))
+      if (proposal.status !== 'pending') {
+        throw new TodoInputError('plan/proposal-not-pending', `提议状态是 ${proposal.status}，只有 pending 可以拒绝`)
+      }
+      const rejectedReason = planReason(reason, limits.proposalReason)
+      const next = { ...proposal, status: 'rejected', rejectedAt: at }
+      if (rejectedReason !== '') next.rejectedReason = rejectedReason
+      await proposalsTable.put(id, next)
+      return next
+    },
+
+    /** One project's changes, oldest version first. */
+    changesFor(projectId, limit) {
+      const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, limits.changes) : 50
+      const items = []
+      for (const [, record] of changesTable.entries()) if (record.projectId === projectId) items.push(record)
+      items.sort((left, right) => left.version - right.version || left.at - right.at || left.id.localeCompare(right.id))
+      return { items: items.slice(0, cap), total: items.length }
+    },
+
+    /**
+     * A JSON snapshot for `plan.export` (B3 renders Markdown from the same data).
+     *
+     * @param id - project id.
+     * @returns the full project plus its change history.
+     */
+    exportProject(id) {
+      const project = requireProject(projectsTable.get(id))
+      const { items } = store.changesFor(id, limits.changes)
+      return { project: store.projectDetail(project), changes: items }
+    },
   }
 
   return store
@@ -396,7 +906,7 @@ export function createStore(domain) {
  *   INBOX.
  * @returns `{ handle(endpoint, payload) }` answering wire results.
  */
-export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveSessionWorkspace }) {
+export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveSessionWorkspace, writePlanFile }) {
   const endpointMap = {
     /**
      * List cards for one bucket, or every bucket.
@@ -505,6 +1015,237 @@ export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveS
       const id = resolveRef(store, payload)
       const record = await store.removeNote(id, payload?.index)
       return { item: projectL0(record) }
+    },
+
+    // ── Project Plan (B1 endpoints, PLAN.md §B1 item 3) ─────────────────────
+
+    /**
+     * List project plans for one workspace, or every workspace (`all: true`).
+     * Only the plan tables are read; ordinary cards are unaffected.
+     */
+    async 'plan.list'(payload) {
+      const all = payload?.all === true
+      const workspace = all
+        ? null
+        : typeof payload?.workspace === 'string' && payload.workspace !== ''
+          ? payload.workspace
+          : INBOX
+      const items = store.allProjects().filter((project) => all || project.workspace === workspace)
+      return { items: items.map((project) => store.projectRow(project)), total: items.length, workspace }
+    },
+
+    /** Full project for the detail view / AI read; phases included. */
+    async 'plan.detail'(payload) {
+      const id = resolveProject(store, payload)
+      return { item: store.projectDetail(store.getProject(id)) }
+    },
+
+    /**
+     * The phase handoff pack (B4). `phaseId` omitted uses the current phase.
+     * Read-only: it never bumps the project version.
+     */
+    async 'plan.context'(payload) {
+      const id = resolveProject(store, payload)
+      return { pack: store.planContext(id, payload?.phaseId) }
+    },
+
+    /**
+     * Create a project plan. `phases` may seed 阶段; phase.* operations are B2.
+     * Creation records a `create` change, so the initial plan stays auditable.
+     */
+    async 'plan.create'(payload) {
+      const { project } = await store.createProject(payload, now())
+      return { item: store.projectRow(project) }
+    },
+
+    /**
+     * Apply a project-level patch. `baseVersion` (optional) turns a stale write
+     * into `plan/stale`; every accepted patch bumps `version` and appends a change.
+     */
+    async 'plan.patch'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.applyChange(id, payload?.patch, {
+        at: now(),
+        baseVersion: payload?.baseVersion,
+        reason: payload?.reason,
+        sourceIds: payload?.sourceIds,
+      })
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    // ── Phase endpoints (B2) ────────────────────────────────────────────────
+
+    /** Append one phase; `number` is required here (display numbers stay explicit). */
+    async 'plan.phase.add'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.addPhase(id, payload, now())
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Edit one phase's fields; status/result have their own endpoints. */
+    async 'plan.phase.update'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.updatePhase(id, payload?.phaseId, payload?.patch, now(), payload?.reason)
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Remove one phase; rejects dependents/children, clears a removed current phase. */
+    async 'plan.phase.remove'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.removePhase(id, payload?.phaseId, now(), payload?.reason)
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Split one phase into children (`children` = phase-shaped objects). */
+    async 'plan.phase.split'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.splitPhase(id, payload?.phaseId, payload?.children, now(), payload?.reason)
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Reorder one phase within its parent group (beforePid/afterPid). */
+    async 'plan.phase.move'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.movePhase(id, payload?.phaseId, payload, now(), payload?.reason)
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Change one phase's status; `split` is reached only through plan.phase.split. */
+    async 'plan.phase.status'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.setPhaseStatus(id, payload?.phaseId, payload?.status, now(), payload?.reason)
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Record (or replace) one phase's actual result; the status is unchanged. */
+    async 'plan.phase.result'(payload) {
+      const id = resolveProject(store, payload)
+      const { project, change } = await store.recordPhaseResult(
+        id,
+        payload?.phaseId,
+        payload?.result,
+        payload?.sessionId,
+        now(),
+        payload?.reason,
+      )
+      return { item: store.projectRow(project), ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Delete a project and cascade its proposals/changes (cards keep dangling links). */
+    async 'plan.remove'(payload) {
+      const id = resolveProject(store, payload)
+      const { proposals, changes } = await store.removeProject(id)
+      return { id, removed: { proposals, changes } }
+    },
+
+    /** Proposals recorded for one project, newest first (`status` optional). */
+    async 'plan.proposal.list'(payload) {
+      const id = resolveProject(store, payload)
+      const status = PROPOSAL_STATUSES.includes(payload?.status) ? payload.status : undefined
+      const items = store.proposalsFor(id, status)
+      return { items, total: items.length }
+    },
+
+    /** Apply a pending proposal; a stale `baseVersion` rejects before writing. */
+    async 'plan.proposal.apply'(payload) {
+      const id = resolveProposal(store, payload)
+      const { project, change, proposal } = await store.applyProposal(id, now())
+      return { item: store.projectRow(project), proposal, ...(change === undefined ? {} : { change }) }
+    },
+
+    /** Reject a pending proposal; the project is untouched. */
+    async 'plan.proposal.reject'(payload) {
+      const id = resolveProposal(store, payload)
+      const proposal = await store.rejectProposal(id, payload?.reason, now())
+      return { item: proposal }
+    },
+
+    /** One project's applied changes, oldest version first (`limit` optional). */
+    async 'plan.change.list'(payload) {
+      const id = resolveProject(store, payload)
+      const { items, total } = store.changesFor(id, payload?.limit)
+      return { items, total }
+    },
+
+    // ── Markdown import/export (B3) ─────────────────────────────────────────
+
+    /** Parse the developer's Markdown into an editable preview; never writes. */
+    async 'plan.import.preview'(payload) {
+      return { preview: parsePlanMarkdown(payload?.text) }
+    },
+
+    /**
+     * Create a project from a (possibly edited) preview. Inferred dependency
+     * bindings / auto numbers must be confirmed first; an unresolvable edge
+     * always rejects rather than being silently dropped.
+     */
+    async 'plan.import.commit'(payload) {
+      const preview = payload?.preview
+      if (preview === null || typeof preview !== 'object' || Array.isArray(preview)) {
+        throw new TodoInputError('plan/import-preview-required', 'preview 必须是 plan.import.preview 的结果')
+      }
+      const inferred = Array.isArray(preview.inferred) ? preview.inferred : []
+      // Every dependency binding is an inference, even if a client edited the
+      // list away; the confirmation flag is the only accepted way to say yes.
+      const phases = Array.isArray(preview.phases) ? preview.phases : []
+      const hasDependencies = phases.some((phase) => Array.isArray(phase?.dependsOn) && phase.dependsOn.length > 0)
+      if ((inferred.length > 0 || hasDependencies) && payload?.confirmedInferred !== true) {
+        const count = inferred.length > 0 ? `${inferred.length} 条推断` : '依赖绑定'
+        throw new TodoInputError(
+          'plan/import-inferred-unconfirmed',
+          `有${count}（依赖映射/自动编号）需要确认；确认后再提交（confirmedInferred: true）`,
+        )
+      }
+      const at = now()
+      const input = importPreviewToProjectInput(preview, {
+        phaseId: () => mintPlanId('ph', () => false),
+        at,
+      })
+      const workspace = typeof payload?.workspace === 'string' ? payload.workspace.trim() : ''
+      if (workspace !== '') input.workspace = workspace
+      const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : ''
+      if (sessionId !== '') {
+        input.origin = { sessionId, turn: 0, seqRange: [0, 0], cwd: workspace, at }
+      }
+      const { project } = await store.createProject(input, at)
+      return { item: store.projectRow(project) }
+    },
+
+    /**
+     * Export one project: `format:'json'` (default) keeps the B1 snapshot;
+     * `format:'markdown'` renders the minimal plan syntax for re-import.
+     */
+    async 'plan.export'(payload) {
+      const id = resolveProject(store, payload)
+      const format = payload?.format === undefined ? 'json' : payload.format
+      if (format === 'json') return store.exportProject(id)
+      if (format !== 'markdown') {
+        throw new TodoInputError('plan/invalid-export-format', "format 必须是 'json' 或 'markdown'")
+      }
+      const record = store.getProject(id)
+      const project = store.projectDetail(record)
+      const markdown = renderPlanMarkdown(project)
+      if (payload?.write === true) {
+        if (typeof writePlanFile !== 'function') {
+          throw new TodoInputError('plan/export-unavailable', '当前环境不能写文件')
+        }
+        let written
+        try {
+          written = await writePlanFile({ workspace: record.workspace, name: record.name, content: markdown })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          throw new TodoInputError('plan/export-file', `写文件失败：${message}`)
+        }
+        return {
+          id,
+          format: 'markdown',
+          version: project.version,
+          markdown,
+          path: written.path,
+          fileName: written.fileName,
+        }
+      }
+      return { id, format: 'markdown', version: project.version, markdown }
     },
   }
 

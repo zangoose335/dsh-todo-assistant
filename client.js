@@ -16,7 +16,24 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const ID = 'todo-assistant'
+    const PLAN_ID = 'todo-assistant-plan'
+    /** Handoff text guard in the client, matching the host renderer. */
+    const PLAN_SEED_LIMIT = 4000
     const NS = 'todoAssistant'
+    const PLAN_STATUS_LABEL = {
+      pending: 'plan.pstatus.pending',
+      active: 'plan.pstatus.active',
+      blocked: 'plan.pstatus.blocked',
+      done: 'plan.pstatus.done',
+      dropped: 'plan.pstatus.dropped',
+      split: 'plan.pstatus.split',
+    }
+    const PROJECT_STATUS_LABEL = {
+      active: 'plan.projstatus.active',
+      paused: 'plan.projstatus.paused',
+      done: 'plan.projstatus.done',
+      dropped: 'plan.projstatus.dropped',
+    }
     /** UI sentinels; the host only ever sees a workspace path or `inbox`. */
     const SCOPE_INBOX = '@inbox'
     const SCOPE_ALL = '@all'
@@ -259,6 +276,114 @@ window.__ModuleLoader__.load({
       'meta.request': '原需求文本',
       'detail.empty': '（无）',
       'detail.loading': '读取中…',
+      'planTab.title': '计划',
+      'planTab.description': '项目计划、阶段与阶段交接',
+      'plan.scope.all': '全部工作区',
+      'plan.scope.inbox': '收件箱',
+      'plan.loading': '加载中…',
+      'plan.retry': '重试',
+      'plan.empty.title': '这里还没有计划',
+      'plan.empty.hint': '点“导入计划”粘贴一份 Markdown，或先建一个空计划',
+      'plan.import': '导入计划',
+      'plan.export': '导出到文件夹',
+      'plan.back': '返回',
+      'plan.name': '项目名',
+      'plan.goal': '目标',
+      'plan.version': '第 {n} 版',
+      'plan.phases': '阶段',
+      'plan.current': '当前阶段',
+      'plan.current.none': '未设置',
+      'plan.setCurrent': '设为当前',
+      'plan.addPhase': '加阶段',
+      'plan.number': '编号',
+      'plan.title': '标题',
+      'plan.next': '下一步',
+      'plan.deps': '依赖（写编号，逗号分隔）',
+      'plan.acceptance': '验收（一行一条）',
+      'plan.mustKeep': '必须保留（一行一条）',
+      'plan.decisions': '项目决策',
+      'plan.risks': '项目风险',
+      'plan.sources': '相关文件',
+      'plan.save': '保存',
+      'plan.cancel': '取消',
+      'plan.edit': '编辑',
+      'plan.split': '拆分',
+      'plan.split.hint': '子阶段标题，一行一个；编号会自动生成',
+      'plan.result': '记录结果',
+      'plan.result.summary': '实际做了什么',
+      'plan.result.test': '测试命令（可空）',
+      'plan.result.status': '测试结果',
+      'plan.test.passed': '通过',
+      'plan.test.failed': '失败',
+      'plan.test.notRun': '没跑',
+      'plan.start': '开始阶段',
+      'plan.insert': '插入交接',
+      'plan.start.fail': '开新会话失败',
+      'plan.insert.fail': '当前没有可用的输入框',
+      'plan.proposals': '待处理提议',
+      'plan.proposals.none': '没有待处理提议',
+      'plan.apply': '应用',
+      'plan.reject': '拒绝',
+      'plan.changes': '变更历史',
+      'plan.changes.none': '还没有变更',
+      'plan.change.v': '第 {n} 版',
+      'plan.import.title': '导入 Markdown 计划',
+      'plan.import.placeholder': '粘贴包含 # 项目名 和 ## Phase 1: 标题 的计划',
+      'plan.import.parse': '解析预览',
+      'plan.import.save': '保存计划',
+      'plan.import.confirm': '我确认上面这些推断',
+      'plan.import.inferred': '需要确认的推断',
+      'plan.import.unclassified': '没认出来的内容（不会保存）',
+      'plan.import.warnings': '提示',
+      'plan.import.phases': '识别到 {n} 个阶段',
+      'plan.import.done': '计划已保存',
+      'plan.import.fail': '导入失败',
+      'plan.import.workspace': '先选一个具体工作区再导入',
+      'plan.export.done': '已导出：{path}',
+      'plan.export.fail': '导出失败',
+      'plan.load.fail': '读取计划失败',
+      'plan.action.fail': '操作失败',
+      'plan.badge.pending': '{n} 个待处理',
+      'plan.none': '（无）',
+      'plan.time.now': '刚刚',
+      'plan.time.minutes': '{n} 分钟前',
+      'plan.time.hours': '{n} 小时前',
+      'plan.time.days': '{n} 天前',
+      'plan.pstatus.pending': '待开始',
+      'plan.pstatus.active': '进行中',
+      'plan.pstatus.blocked': '阻塞',
+      'plan.pstatus.done': '已完成',
+      'plan.pstatus.dropped': '已放弃',
+      'plan.pstatus.split': '已拆分',
+      'plan.projstatus.active': '进行中',
+      'plan.projstatus.paused': '暂停',
+      'plan.projstatus.done': '已完成',
+      'plan.projstatus.dropped': '已放弃',
+      'plan.phaseMeta': '依赖 {deps} · 验收 {n} 条',
+      'plan.phaseMetaNone': '没有依赖',
+      'plan.err.unknownDep': '依赖「{name}」找不到对应阶段',
+      'plan.err.noWorkspace': '这个计划没有工作区，先把它放到一个工作区',
+      'plan.seed.header': '计划交接：{name} — 阶段 {number} {title}（{status}），项目{pstatus}，第 {version} 版',
+      'plan.seed.projectGoal': '项目目标：{goal}',
+      'plan.seed.phaseGoal': '阶段目标：{goal}',
+      'plan.seed.next': '下一步：{next}',
+      'plan.seed.before': '开始前：',
+      'plan.seed.before1': '- 先核对下面提到的文件和文档是否还成立；路径只是线索。',
+      'plan.seed.before2': '- 不要自己回读历史原文；需要时先问开发者。',
+      'plan.seed.before3': '- 发现和计划冲突，直接告诉开发者。',
+      'plan.seed.prereq': '前置阶段：',
+      'plan.seed.prereqResult': '- {number} {title}（{status}）：{result}',
+      'plan.seed.noResult': '结果未记录',
+      'plan.seed.decisions': '决策：',
+      'plan.seed.mustKeep': '必须保留：',
+      'plan.seed.acceptance': '验收：',
+      'plan.seed.risks': '风险：',
+      'plan.seed.unresolved': '未解决：',
+      'plan.seed.rules': '工作区规则：',
+      'plan.seed.sources': '相关文件：',
+      'plan.seed.pending': '待处理提议：{n} 个',
+      'plan.seed.noGoal': '（未记录）',
+      'plan.seed.truncated': '（内容较长，已截断；用 todo_plan_read 查看完整计划）',
     }
 
     const EN = {
@@ -423,6 +548,114 @@ Keep in mind
       'meta.request': 'Request',
       'detail.empty': '(none)',
       'detail.loading': 'Reading…',
+      'planTab.title': 'Plan',
+      'planTab.description': 'Project plans, phases and phase handoffs',
+      'plan.scope.all': 'All workspaces',
+      'plan.scope.inbox': 'Inbox',
+      'plan.loading': 'Loading…',
+      'plan.retry': 'Retry',
+      'plan.empty.title': 'No plans yet',
+      'plan.empty.hint': 'Use "Import" to paste a Markdown plan, or create an empty one first',
+      'plan.import': 'Import',
+      'plan.export': 'Export to folder',
+      'plan.back': 'Back',
+      'plan.name': 'Name',
+      'plan.goal': 'Goal',
+      'plan.version': 'v{n}',
+      'plan.phases': 'Phases',
+      'plan.current': 'Current phase',
+      'plan.current.none': 'Not set',
+      'plan.setCurrent': 'Set current',
+      'plan.addPhase': 'Add phase',
+      'plan.number': 'Number',
+      'plan.title': 'Title',
+      'plan.next': 'Next step',
+      'plan.deps': 'Depends on (numbers, comma separated)',
+      'plan.acceptance': 'Acceptance (one per line)',
+      'plan.mustKeep': 'Must keep (one per line)',
+      'plan.decisions': 'Project decisions',
+      'plan.risks': 'Project risks',
+      'plan.sources': 'Sources',
+      'plan.save': 'Save',
+      'plan.cancel': 'Cancel',
+      'plan.edit': 'Edit',
+      'plan.split': 'Split',
+      'plan.split.hint': 'One child title per line; numbers are generated',
+      'plan.result': 'Record result',
+      'plan.result.summary': 'What was actually done',
+      'plan.result.test': 'Test command (optional)',
+      'plan.result.status': 'Test result',
+      'plan.test.passed': 'passed',
+      'plan.test.failed': 'failed',
+      'plan.test.notRun': 'not run',
+      'plan.start': 'Start phase',
+      'plan.insert': 'Insert handoff',
+      'plan.start.fail': 'Could not start a session',
+      'plan.insert.fail': 'No composer is available',
+      'plan.proposals': 'Pending proposals',
+      'plan.proposals.none': 'No pending proposals',
+      'plan.apply': 'Apply',
+      'plan.reject': 'Reject',
+      'plan.changes': 'Change history',
+      'plan.changes.none': 'No changes yet',
+      'plan.change.v': 'v{n}',
+      'plan.import.title': 'Import a Markdown plan',
+      'plan.import.placeholder': 'Paste a plan with "# Project" and "## Phase 1: title"',
+      'plan.import.parse': 'Preview',
+      'plan.import.save': 'Save plan',
+      'plan.import.confirm': 'I confirm the inferred items above',
+      'plan.import.inferred': 'Inferred items to confirm',
+      'plan.import.unclassified': 'Unclassified (not saved)',
+      'plan.import.warnings': 'Warnings',
+      'plan.import.phases': '{n} phase(s) recognized',
+      'plan.import.done': 'Plan saved',
+      'plan.import.fail': 'Import failed',
+      'plan.import.workspace': 'Pick a concrete workspace before importing',
+      'plan.export.done': 'Exported: {path}',
+      'plan.export.fail': 'Export failed',
+      'plan.load.fail': 'Could not load plans',
+      'plan.action.fail': 'Action failed',
+      'plan.badge.pending': '{n} pending',
+      'plan.none': '(none)',
+      'plan.time.now': 'just now',
+      'plan.time.minutes': '{n} min ago',
+      'plan.time.hours': '{n} h ago',
+      'plan.time.days': '{n} d ago',
+      'plan.pstatus.pending': 'pending',
+      'plan.pstatus.active': 'active',
+      'plan.pstatus.blocked': 'blocked',
+      'plan.pstatus.done': 'done',
+      'plan.pstatus.dropped': 'dropped',
+      'plan.pstatus.split': 'split',
+      'plan.projstatus.active': 'active',
+      'plan.projstatus.paused': 'paused',
+      'plan.projstatus.done': 'done',
+      'plan.projstatus.dropped': 'dropped',
+      'plan.phaseMeta': 'depends on {deps} · {n} acceptance',
+      'plan.phaseMetaNone': 'no dependencies',
+      'plan.err.unknownDep': 'Dependency "{name}" does not match a phase',
+      'plan.err.noWorkspace': 'This plan has no workspace; put it in one first',
+      'plan.seed.header': 'Plan handoff: {name} — phase {number} {title} ({status}), project {pstatus}, v{version}',
+      'plan.seed.projectGoal': 'Project goal: {goal}',
+      'plan.seed.phaseGoal': 'Phase goal: {goal}',
+      'plan.seed.next': 'Next step: {next}',
+      'plan.seed.before': 'Before you start:',
+      'plan.seed.before1': '- Verify the referenced files/documents first; paths are leads, not facts.',
+      'plan.seed.before2': '- Do not read history bodies on your own; ask the developer first.',
+      'plan.seed.before3': '- If a source conflicts with the plan, tell the developer.',
+      'plan.seed.prereq': 'Prerequisite phases:',
+      'plan.seed.prereqResult': '- {number} {title} ({status}): {result}',
+      'plan.seed.noResult': 'result not recorded',
+      'plan.seed.decisions': 'Decisions:',
+      'plan.seed.mustKeep': 'Must keep:',
+      'plan.seed.acceptance': 'Acceptance:',
+      'plan.seed.risks': 'Risks:',
+      'plan.seed.unresolved': 'Unresolved:',
+      'plan.seed.rules': 'Workspace rules:',
+      'plan.seed.sources': 'Sources:',
+      'plan.seed.pending': 'Pending proposals: {n}',
+      'plan.seed.noGoal': '(not recorded)',
+      'plan.seed.truncated': '(truncated because it is long; use todo_plan_read for the full plan)',
     }
 
     /** Fill `{n}` in a localized line. */
@@ -598,6 +831,56 @@ Keep in mind
 .tdash-note-text { flex: 1 1 auto; min-width: 0; color: var(--dsw-alias-label-secondary); word-break: break-word; }
 .tdash-mono { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; color: var(--dsw-alias-label-secondary); word-break: break-all; }
 .tdash-err { padding: 6px 8px; border-radius: 6px; color: var(--dsw-alias-state-error-primary); border: 1px solid var(--dsw-alias-state-error-primary); font-size: 11px; word-break: break-word; }
+.tplan-root { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--dsw-specific-sidebar-fill); color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 1.45; }
+.tplan-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px; }
+.tplan-scope { flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; }
+.tplan-btn { flex: 0 0 auto; box-sizing: border-box; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
+.tplan-btn:hover, .tplan-btn[data-on="true"] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.tplan-btn:disabled { opacity: .55; cursor: default; }
+.tplan-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 38px; display: flex; flex-direction: column; gap: 6px; }
+.tplan-empty { padding: 18px 8px; text-align: center; color: var(--dsw-alias-label-secondary); display: flex; flex-direction: column; gap: 6px; }
+.tplan-empty-title { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.tplan-err { padding: 6px 8px; border-radius: 6px; color: var(--dsw-alias-state-error-primary); border: 1px solid var(--dsw-alias-state-error-primary); font-size: 11px; word-break: break-word; }
+.tplan-item { box-sizing: border-box; text-align: left; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 7px 8px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; color: inherit; font: inherit; }
+.tplan-item:hover { border-color: var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2); }
+.tplan-item-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; word-break: break-word; }
+.tplan-item-goal { color: var(--dsw-alias-label-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tplan-item-meta { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 10px; flex-wrap: wrap; }
+.tplan-badge { margin-left: auto; border-radius: 999px; padding: 0 6px; background: var(--dsw-alias-brand-primary); color: var(--dsw-static-neutral-bluish-00); font-size: 10px; line-height: 16px; }
+.tplan-bar { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.tplan-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 600; word-break: break-word; }
+.tplan-section { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.tplan-sec-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.tplan-goal { color: var(--dsw-alias-label-secondary); white-space: pre-wrap; word-break: break-word; }
+.tplan-hint { color: var(--dsw-alias-label-secondary); font-size: 10px; word-break: break-word; }
+.tplan-source { color: var(--dsw-alias-label-secondary); font-size: 10px; word-break: break-word; }
+.tplan-phase { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.tplan-phase[data-current="true"] { border-color: var(--dsw-alias-brand-primary); }
+.tplan-phase-head { display: flex; align-items: center; gap: 6px; }
+.tplan-num { flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tplan-phase-title { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.tplan-status { flex: 0 0 auto; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 0 6px; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 16px; }
+.tplan-status[data-status="done"] { color: var(--dsw-alias-state-success-primary); border-color: var(--dsw-alias-state-success-primary); }
+.tplan-status[data-status="active"] { color: var(--dsw-alias-state-business-primary); border-color: var(--dsw-alias-state-business-primary); }
+.tplan-status[data-status="blocked"] { color: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); }
+.tplan-phase-meta { color: var(--dsw-alias-label-secondary); font-size: 10px; word-break: break-word; }
+.tplan-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.tplan-action { border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 18px; padding: 0 7px; cursor: pointer; }
+.tplan-action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.tplan-action:disabled { opacity: .55; cursor: default; }
+.tplan-form { border: 1px dashed var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.tplan-field { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--dsw-alias-label-secondary); }
+.tplan-input, .tplan-textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; padding: 3px 6px; }
+.tplan-textarea { min-height: 46px; resize: vertical; }
+.tplan-row { display: flex; align-items: center; gap: 6px; }
+.tplan-row .tplan-input, .tplan-row .tplan-textarea { flex: 1 1 auto; }
+.tplan-select { box-sizing: border-box; height: 24px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: inherit; font-size: 11px; }
+.tplan-preview { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; background: var(--dsw-alias-bg-layer-1); }
+.tplan-check { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+.tplan-listline { font-size: 10px; color: var(--dsw-alias-label-secondary); word-break: break-word; }
+.tplan-change { font-size: 10px; color: var(--dsw-alias-label-secondary); word-break: break-word; }
+.tplan-busy { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); opacity: 0; transition: opacity .12s linear; }
+.tplan-busy[data-on="true"] { opacity: 1; }
 `
 
     /**
@@ -2758,6 +3041,1086 @@ Keep in mind
         )
       }
 
+      /** Status label for a phase/project; unknown values fall back to the raw value. */
+      function statusText(t, status, map) {
+        const key = map[status]
+        return key === undefined ? String(status) : t(key)
+      }
+
+      /** Root-first phase order with a depth for indentation. */
+      function planTree(phases) {
+        const list = Array.isArray(phases) ? phases : []
+        const children = new Map()
+        const roots = []
+        for (const phase of list) {
+          if (phase.parentPid === undefined || phase.parentPid === null) roots.push(phase)
+          else {
+            const bucket = children.get(phase.parentPid) ?? []
+            bucket.push(phase)
+            children.set(phase.parentPid, bucket)
+          }
+        }
+        const ordered = []
+        const seen = new Set()
+        const visit = (phase, depth) => {
+          if (seen.has(phase.pid)) return
+          seen.add(phase.pid)
+          ordered.push({ phase, depth })
+          for (const child of children.get(phase.pid) ?? []) visit(child, depth + 1)
+        }
+        for (const root of roots) visit(root, 0)
+        for (const phase of list) if (!seen.has(phase.pid)) ordered.push({ phase, depth: 0 })
+        return ordered
+      }
+
+      /** A short "how long ago" label for the change history. */
+      function timeAgo(t, at) {
+        const then = Number.isFinite(at) ? at : Date.now()
+        const minutes = Math.floor(Math.max(0, Date.now() - then) / 60000)
+        if (minutes < 1) return t('plan.time.now')
+        if (minutes < 60) return fill2(t('plan.time.minutes'), { n: minutes })
+        const hours = Math.floor(minutes / 60)
+        if (hours < 24) return fill2(t('plan.time.hours'), { n: hours })
+        return fill2(t('plan.time.days'), { n: Math.floor(hours / 24) })
+      }
+
+      function linesOf(value) {
+        return String(value ?? '')
+          .split(/\r?\n/u)
+          .map((line) => line.trim())
+          .filter((line) => line !== '')
+      }
+
+      function evidenceOf(value, label) {
+        return linesOf(value).map((text) => ({ label, text, basis: 'decided' }))
+      }
+
+      /** The localized opening text a fresh session gets (same fields as the host pack). */
+      function planSeedText(t, pack) {
+        const project = pack.project ?? {}
+        const phase = pack.phase ?? {}
+        const status = (value, map) => statusText(t, value, map)
+        const goal = (value) => (typeof value === 'string' && value !== '' ? value : t('plan.seed.noGoal'))
+        const lines = [
+          fill2(t('plan.seed.header'), {
+            name: project.name ?? '',
+            number: phase.number ?? '',
+            title: phase.title ?? '',
+            status: status(phase.status, PLAN_STATUS_LABEL),
+            pstatus: status(project.status, PROJECT_STATUS_LABEL),
+            version: project.version ?? '',
+          }),
+          '',
+          fill2(t('plan.seed.projectGoal'), { goal: goal(project.goal) }),
+          fill2(t('plan.seed.phaseGoal'), { goal: goal(phase.goal) }),
+          fill2(t('plan.seed.next'), { next: goal(phase.nextStep) }),
+          '',
+          t('plan.seed.before'),
+          t('plan.seed.before1'),
+          t('plan.seed.before2'),
+          t('plan.seed.before3'),
+        ]
+        const prerequisites = Array.isArray(pack.prerequisites) ? pack.prerequisites : []
+        if (prerequisites.length > 0) {
+          lines.push('', t('plan.seed.prereq'))
+          for (const entry of prerequisites) {
+            lines.push(
+              fill2(t('plan.seed.prereqResult'), {
+                number: entry.number,
+                title: entry.title,
+                status: status(entry.status, PLAN_STATUS_LABEL),
+                result:
+                  entry.result === null || entry.result === undefined ? t('plan.seed.noResult') : entry.result.summary,
+              }),
+            )
+          }
+        }
+        const pushList = (titleKey, items) => {
+          if (items.length > 0) lines.push('', t(titleKey), ...items)
+        }
+        pushList('plan.seed.decisions', (pack.decisions ?? []).map((item) => `- [${item.scope}] ${item.text}`))
+        pushList('plan.seed.mustKeep', (pack.mustKeep ?? []).map((item) => `- ${item.text}`))
+        pushList('plan.seed.acceptance', (pack.acceptance ?? []).map((item) => `- ${item.text}`))
+        pushList('plan.seed.risks', (pack.risks ?? []).map((item) => `- ${item.text}`))
+        pushList('plan.seed.unresolved', (pack.unresolved ?? []).map((item) => `- ${item}`))
+        const rules = typeof pack.rules === 'string' ? pack.rules.trim() : ''
+        if (rules !== '') lines.push('', t('plan.seed.rules'), rules)
+        pushList(
+          'plan.seed.sources',
+          (pack.sources ?? []).map((source) => {
+            const where =
+              source.where?.file ?? (source.where?.sessionId === undefined ? '' : `session ${source.where.sessionId}`)
+            return `- ${source.sid} [${source.kind}] ${source.label}${where === '' ? '' : ` — ${where}`}`
+          }),
+        )
+        if (Number.isInteger(pack.pendingProposalCount) && pack.pendingProposalCount > 0) {
+          lines.push('', fill2(t('plan.seed.pending'), { n: pack.pendingProposalCount }))
+        }
+        const text = lines.join('\n')
+        if ([...text].length <= PLAN_SEED_LIMIT) return text
+        const hint = t('plan.seed.truncated')
+        const room = PLAN_SEED_LIMIT - [...hint].length - 2
+        return `${[...text].slice(0, Math.max(0, room)).join('')}…\n\n${hint}`
+      }
+
+      /**
+       * The plan page: project list, one project's phases/actions, Markdown
+       * import/export, pending proposals and change history. It sits beside the
+       * card page and never touches its state.
+       */
+      function PlanPanel(props) {
+        useLocaleSignal(ctx)
+        const useTabInfo = props.useTabInfo
+        const tabInfo = typeof useTabInfo === 'function' ? useTabInfo() : null
+        const visible = tabInfo === null ? true : tabInfo.tab.visible
+        const sessionId = props.sessionId
+        const useWorkspaces = props.useWorkspaces
+        const hasWorkspaces = typeof useWorkspaces === 'function'
+        const currentPath = hasWorkspaces
+          ? useWorkspaces((snapshot) => {
+              const found = snapshot.items.find((workspace) => workspace.sessionIds.includes(sessionId))
+              return found === undefined ? '' : found.path
+            })
+          : ''
+        const workspacePhase = hasWorkspaces ? useWorkspaces((snapshot) => snapshot.phase) : 'ready'
+        const workspaceRows = hasWorkspaces ? useWorkspaces((snapshot) => snapshot.items) : []
+
+        const [scopePick, setScopePick] = React.useState(null)
+        const autoScope = currentPath !== '' ? currentPath : workspacePhase === 'ready' ? SCOPE_ALL : null
+        const scope = scopePick ?? autoScope
+        const [projects, setProjects] = React.useState([])
+        const [phase, setPhase] = React.useState('loading')
+        const [errorText, setErrorText] = React.useState('')
+        const [selectedId, setSelectedId] = React.useState(null)
+        const [detail, setDetail] = React.useState(null)
+        const [proposals, setProposals] = React.useState([])
+        const [changes, setChanges] = React.useState([])
+        const [busy, setBusy] = React.useState(false)
+        const [importOpen, setImportOpen] = React.useState(false)
+        const [importText, setImportText] = React.useState('')
+        const [preview, setPreview] = React.useState(null)
+        const [confirmedInferred, setConfirmedInferred] = React.useState(false)
+        const [exportPath, setExportPath] = React.useState('')
+        const [form, setForm] = React.useState(null)
+        const [showChanges, setShowChanges] = React.useState(false)
+        const busyRef = React.useRef(false)
+        const selectedRef = React.useRef(null)
+
+        React.useEffect(() => {
+          setScopePick(null)
+        }, [currentPath])
+        React.useEffect(() => {
+          busyRef.current = busy
+        }, [busy])
+        React.useEffect(() => {
+          selectedRef.current = selectedId
+        }, [selectedId])
+
+        const loadProjects = React.useCallback(
+          async (silent) => {
+            if (scope === null) {
+              setPhase('loading')
+              return
+            }
+            if (silent !== true) setPhase('loading')
+            setErrorText('')
+            try {
+              const value =
+                scope === SCOPE_ALL
+                  ? await call('plan.list', { all: true })
+                  : await call('plan.list', { workspace: scope === SCOPE_INBOX ? INBOX : scope })
+              setProjects(Array.isArray(value.items) ? value.items : [])
+              setPhase('ready')
+            } catch (error) {
+              setPhase('error')
+              setErrorText(`${t('plan.load.fail')}: ${errorTextOf(error)}`)
+            }
+          },
+          [scope],
+        )
+
+        const loadDetail = React.useCallback(async (id, silent) => {
+          if (silent !== true) setErrorText('')
+          try {
+            const [project, proposalList, changeList] = await Promise.all([
+              call('plan.detail', { id }),
+              call('plan.proposal.list', { id }),
+              call('plan.change.list', { id, limit: 50 }),
+            ])
+            setDetail(project.item)
+            setProposals(Array.isArray(proposalList.items) ? proposalList.items : [])
+            setChanges(Array.isArray(changeList.items) ? changeList.items : [])
+          } catch (error) {
+            setErrorText(`${t('plan.load.fail')}: ${errorTextOf(error)}`)
+          }
+        }, [])
+
+        React.useEffect(() => {
+          void loadProjects(false)
+        }, [loadProjects])
+        React.useEffect(() => {
+          if (selectedId === null) {
+            setDetail(null)
+            setProposals([])
+            setChanges([])
+            return
+          }
+          void loadDetail(selectedId, false)
+        }, [selectedId, loadDetail])
+        React.useEffect(() => {
+          if (!visible) return undefined
+          const timer = setInterval(() => {
+            if (busyRef.current) return
+            void loadProjects(true)
+            if (selectedRef.current !== null) void loadDetail(selectedRef.current, true)
+          }, 4000)
+          return () => clearInterval(timer)
+        }, [visible, loadProjects, loadDetail])
+
+        const importWorkspace = scope !== null && scope !== SCOPE_ALL && scope !== SCOPE_INBOX ? scope : currentPath
+
+        async function reload(id) {
+          await loadProjects(true)
+          if (id !== undefined && id !== null) await loadDetail(id, true)
+        }
+
+        async function run(action, prefix) {
+          setBusy(true)
+          setErrorText('')
+          try {
+            await action()
+          } catch (error) {
+            setErrorText(`${prefix ?? t('plan.action.fail')}: ${errorTextOf(error)}`)
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        function selectProject(id) {
+          setSelectedId(id)
+          setDetail(null)
+          setForm(null)
+          setExportPath('')
+          setShowChanges(false)
+          setErrorText('')
+        }
+
+        async function parseImport() {
+          setBusy(true)
+          setErrorText('')
+          try {
+            const value = await call('plan.import.preview', { text: importText })
+            setPreview(value.preview)
+            setConfirmedInferred(false)
+          } catch (error) {
+            setErrorText(`${t('plan.import.fail')}: ${errorTextOf(error)}`)
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        async function saveImport() {
+          if (preview === null) return
+          if (importWorkspace === '' || importWorkspace === undefined) {
+            setErrorText(t('plan.import.workspace'))
+            return
+          }
+          const inferred = Array.isArray(preview.inferred) ? preview.inferred : []
+          if (inferred.length > 0 && !confirmedInferred) {
+            setErrorText(t('plan.import.confirm'))
+            return
+          }
+          await run(async () => {
+            const value = await call('plan.import.commit', {
+              preview,
+              workspace: importWorkspace,
+              confirmedInferred: true,
+            })
+            setImportOpen(false)
+            setPreview(null)
+            setImportText('')
+            setConfirmedInferred(false)
+            selectProject(value.item.id)
+            await reload(value.item.id)
+          }, t('plan.import.fail'))
+        }
+
+        async function startPhase(target) {
+          if (detail === null) return
+          await run(async () => {
+            const pack = (await call('plan.context', { id: detail.id, phaseId: target.pid })).pack
+            const text = planSeedText(t, pack)
+            const row = workspaceRows.find((workspace) => workspace.path === detail.workspace)
+            let request
+            if (row !== undefined) request = { workspaceId: row.workspaceId }
+            else if (detail.workspace === INBOX) {
+              if (currentPath === '') throw new Error(t('plan.err.noWorkspace'))
+              request = { cwd: currentPath }
+            } else request = { cwd: detail.workspace }
+            const sessionRemote = ctx.remote.session
+            if (sessionRemote === undefined) throw new Error(t('plan.start.fail'))
+            const created = await sessionRemote.create(request)
+            if (created.ok !== true) throw new Error(`${t('plan.start.fail')}: ${created.error.code}`)
+            const prompted = await sessionRemote.prompt({
+              sessionId: created.value.sessionId,
+              requestId: newRequestId(),
+              mode: 'queue',
+              content: [{ type: 'text', text }],
+            })
+            if (prompted.ok !== true) throw new Error(`${t('plan.start.fail')}: ${prompted.error.code}`)
+            try {
+              await call('plan.phase.status', { id: detail.id, phaseId: target.pid, status: 'active' })
+            } catch {
+              // Marking the phase active is best-effort; the session is already open.
+            }
+            ctx.uiWorkspace.openSession(created.value.sessionId)
+            await reload(detail.id)
+          }, t('plan.start.fail'))
+        }
+
+        async function insertHandoff(target) {
+          if (detail === null) return
+          setBusy(true)
+          setErrorText('')
+          try {
+            const pack = (await call('plan.context', { id: detail.id, phaseId: target.pid })).pack
+            const text = planSeedText(t, pack)
+            const actions = props.inputActions
+            if (actions === undefined || actions === null) {
+              setErrorText(t('plan.insert.fail'))
+              return
+            }
+            try {
+              const span = actions.captureInsertion()
+              if (actions.insertText(text, span) !== true) actions.setDraft(text)
+            } catch {
+              try {
+                actions.setDraft(text)
+              } catch {
+                setErrorText(t('plan.insert.fail'))
+              }
+            }
+          } catch (error) {
+            setErrorText(`${t('plan.insert.fail')}: ${errorTextOf(error)}`)
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        function exportPlan() {
+          if (detail === null) return
+          void run(async () => {
+            const value = await call('plan.export', { id: detail.id, format: 'markdown', write: true })
+            setExportPath(typeof value.path === 'string' ? value.path : '')
+          }, t('plan.export.fail'))
+        }
+
+        function changeStatus(target, status) {
+          if (detail === null || status === target.status) return
+          void run(async () => {
+            await call('plan.phase.status', { id: detail.id, phaseId: target.pid, status })
+            await reload(detail.id)
+          })
+        }
+
+        function setCurrent(pid) {
+          if (detail === null) return
+          void run(async () => {
+            await call('plan.patch', { id: detail.id, patch: { currentPhaseId: pid === '' ? null : pid } })
+            await reload(detail.id)
+          })
+        }
+
+        function applyProposal(proposal) {
+          if (detail === null) return
+          void run(async () => {
+            await call('plan.proposal.apply', { id: proposal.id })
+            await reload(detail.id)
+          })
+        }
+
+        function rejectProposal(proposal) {
+          if (detail === null) return
+          void run(async () => {
+            await call('plan.proposal.reject', { id: proposal.id })
+            await reload(detail.id)
+          })
+        }
+
+        function openAdd() {
+          setForm({ mode: 'add', pid: null, values: { number: '', title: '', goal: '', nextStep: '', dependsOn: '', acceptance: '', mustKeep: '' } })
+        }
+        function openEdit(project, target) {
+          const byPid = new Map(project.phases.map((item) => [item.pid, item]))
+          setForm({
+            mode: 'edit',
+            pid: target.pid,
+            values: {
+              number: target.number,
+              title: target.title,
+              goal: target.goal ?? '',
+              nextStep: target.nextStep ?? '',
+              dependsOn: (target.dependsOn ?? []).map((pid) => byPid.get(pid)?.number ?? '').filter(Boolean).join(', '),
+              acceptance: (target.acceptance ?? []).map((item) => item.text).join('\n'),
+              mustKeep: (target.mustKeep ?? []).map((item) => item.text).join('\n'),
+            },
+          })
+        }
+        function openSplit(target) {
+          setForm({ mode: 'split', pid: target.pid, values: { titles: '' } })
+        }
+        function openResult(target) {
+          setForm({ mode: 'result', pid: target.pid, values: { summary: '', command: '', status: 'passed' } })
+        }
+        function changeField(field, value) {
+          setForm((current) => (current === null ? current : { ...current, values: { ...current.values, [field]: value } }))
+        }
+        function resolveDeps(text, phases) {
+          const map = new Map(phases.map((item) => [item.number.toLowerCase(), item.pid]))
+          return linesOf(String(text ?? '').replace(/[，、;；]/gu, '\n'))
+            .map((value) => value.replace(/^(?:Phase|阶段)\s*/iu, '').trim())
+            .filter((value) => value !== '')
+            .map((value) => {
+              const pid = map.get(value.toLowerCase())
+              if (pid === undefined) throw new Error(fill2(t('plan.err.unknownDep'), { name: value }))
+              return pid
+            })
+        }
+        function saveForm() {
+          if (form === null || detail === null) return
+          const values = form.values
+          const project = detail
+          let deps = []
+          try {
+            deps = resolveDeps(values.dependsOn, project.phases)
+          } catch (error) {
+            setErrorText(errorTextOf(error))
+            return
+          }
+          if (form.mode === 'add') {
+            if (values.number.trim() === '' || values.title.trim() === '') return
+            void run(async () => {
+              await call('plan.phase.add', {
+                id: project.id,
+                number: values.number.trim(),
+                title: values.title.trim(),
+                goal: values.goal,
+                nextStep: values.nextStep,
+                dependsOn: deps,
+                acceptance: evidenceOf(values.acceptance, 'acceptance'),
+                mustKeep: evidenceOf(values.mustKeep, 'context'),
+              })
+              setForm(null)
+              await reload(project.id)
+            })
+            return
+          }
+          if (form.mode === 'edit') {
+            void run(async () => {
+              await call('plan.phase.update', {
+                id: project.id,
+                phaseId: form.pid,
+                patch: {
+                  number: values.number.trim(),
+                  title: values.title.trim(),
+                  goal: values.goal,
+                  nextStep: values.nextStep,
+                  dependsOn: deps,
+                  acceptance: evidenceOf(values.acceptance, 'acceptance'),
+                  mustKeep: evidenceOf(values.mustKeep, 'context'),
+                },
+              })
+              setForm(null)
+              await reload(project.id)
+            })
+            return
+          }
+          if (form.mode === 'split') {
+            const titles = linesOf(values.titles)
+            if (titles.length === 0) return
+            void run(async () => {
+              await call('plan.phase.split', {
+                id: project.id,
+                phaseId: form.pid,
+                children: titles.map((title) => ({ title })),
+              })
+              setForm(null)
+              await reload(project.id)
+            })
+            return
+          }
+          if (form.mode === 'result') {
+            if (values.summary.trim() === '') return
+            void run(async () => {
+              const tests =
+                values.command.trim() === '' ? [] : [{ command: values.command.trim(), status: values.status }]
+              await call('plan.phase.result', {
+                id: project.id,
+                phaseId: form.pid,
+                sessionId,
+                result: { summary: values.summary.trim(), tests },
+              })
+              setForm(null)
+              await reload(project.id)
+            })
+          }
+        }
+
+        function renderField(label, key, tag) {
+          return h(
+            'label',
+            { className: 'tplan-field', key },
+            label,
+            tag === 'textarea'
+              ? h('textarea', {
+                  className: 'tplan-textarea',
+                  value: form.values[key],
+                  onChange: (event) => changeField(key, event.target.value),
+                })
+              : h('input', {
+                  className: 'tplan-input',
+                  value: form.values[key],
+                  onChange: (event) => changeField(key, event.target.value),
+                }),
+          )
+        }
+
+        function renderPhaseForm() {
+          if (form === null) return null
+          if (form.mode === 'split') {
+            return h(
+              'div',
+              { className: 'tplan-form' },
+              renderField(t('plan.split.hint'), 'titles', 'textarea'),
+              h(
+                'div',
+                { className: 'tplan-row' },
+                h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: saveForm }, t('plan.save')),
+                h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: () => setForm(null) }, t('plan.cancel')),
+              ),
+            )
+          }
+          if (form.mode === 'result') {
+            return h(
+              'div',
+              { className: 'tplan-form' },
+              renderField(t('plan.result.summary'), 'summary', 'textarea'),
+              renderField(t('plan.result.test'), 'command'),
+              h(
+                'label',
+                { className: 'tplan-field' },
+                t('plan.result.status'),
+                h(
+                  'select',
+                  {
+                    className: 'tplan-select',
+                    value: form.values.status,
+                    onChange: (event) => changeField('status', event.target.value),
+                  },
+                  h('option', { value: 'passed' }, t('plan.test.passed')),
+                  h('option', { value: 'failed' }, t('plan.test.failed')),
+                  h('option', { value: 'not-run' }, t('plan.test.notRun')),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'tplan-row' },
+                h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: saveForm }, t('plan.save')),
+                h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: () => setForm(null) }, t('plan.cancel')),
+              ),
+            )
+          }
+          return h(
+            'div',
+            { className: 'tplan-form' },
+            h(
+              'div',
+              { className: 'tplan-row' },
+              renderField(t('plan.number'), 'number'),
+              renderField(t('plan.title'), 'title'),
+            ),
+            renderField(t('plan.goal'), 'goal'),
+            renderField(t('plan.next'), 'nextStep'),
+            renderField(t('plan.deps'), 'dependsOn'),
+            renderField(t('plan.acceptance'), 'acceptance', 'textarea'),
+            renderField(t('plan.mustKeep'), 'mustKeep', 'textarea'),
+            h(
+              'div',
+              { className: 'tplan-row' },
+              h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: saveForm }, t('plan.save')),
+              h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: () => setForm(null) }, t('plan.cancel')),
+            ),
+          )
+        }
+
+        function renderPreview() {
+          if (preview === null) return null
+          const inferred = Array.isArray(preview.inferred) ? preview.inferred : []
+          const unresolved = inferred.filter((item) => item.resolved === false)
+          const unclassified = Array.isArray(preview.unclassified) ? preview.unclassified : []
+          const warnings = Array.isArray(preview.warnings) ? preview.warnings : []
+          const phaseList = Array.isArray(preview.phases) ? preview.phases : []
+          return h(
+            'div',
+            { className: 'tplan-preview' },
+            h('div', { className: 'tplan-sec-head' }, preview.name || '—'),
+            h('div', { className: 'tplan-goal' }, preview.goal || '—'),
+            h('div', { className: 'tplan-hint' }, fill2(t('plan.import.phases'), { n: phaseList.length })),
+            ...phaseList.slice(0, 30).map((item, index) =>
+              h(
+                'div',
+                { key: `phase-${index}`, className: 'tplan-listline' },
+                `- ${item.number} ${item.title}${item.parentNumber === undefined ? '' : ` (${item.parentNumber})`}`,
+              ),
+            ),
+            inferred.length > 0
+              ? h(
+                  'div',
+                  null,
+                  h('div', { className: 'tplan-listline' }, `${t('plan.import.inferred')} (${inferred.length})`),
+                  ...inferred
+                    .slice(0, 20)
+                    .map((item, index) =>
+                      h('div', { key: `inferred-${index}`, className: 'tplan-listline' }, `- ${item.kind} · ${item.phase} · ${item.text}`),
+                    ),
+                  h(
+                    'label',
+                    { className: 'tplan-check' },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: confirmedInferred,
+                      onChange: (event) => setConfirmedInferred(event.target.checked),
+                    }),
+                    t('plan.import.confirm'),
+                  ),
+                )
+              : null,
+            unresolved.length > 0
+              ? h(
+                  'div',
+                  { className: 'tplan-err' },
+                  `${t('plan.import.inferred')}: ${unresolved.map((item) => `${item.phase} ${item.text}`).join('；')}`,
+                )
+              : null,
+            unclassified.length > 0
+              ? h(
+                  'div',
+                  null,
+                  h('div', { className: 'tplan-listline' }, `${t('plan.import.unclassified')} (${unclassified.length})`),
+                  ...unclassified
+                    .slice(0, 10)
+                    .map((item, index) => h('div', { key: `unclassified-${index}`, className: 'tplan-listline' }, `- ${item.text}`)),
+                )
+              : null,
+            warnings.length > 0
+              ? h(
+                  'div',
+                  null,
+                  h('div', { className: 'tplan-listline' }, t('plan.import.warnings')),
+                  ...warnings.map((text, index) => h('div', { key: `warning-${index}`, className: 'tplan-listline' }, `- ${text}`)),
+                )
+              : null,
+            h(
+              'div',
+              { className: 'tplan-row' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'tplan-btn',
+                  disabled: busy || (inferred.length > 0 && !confirmedInferred) || unresolved.length > 0,
+                  onClick: saveImport,
+                },
+                t('plan.import.save'),
+              ),
+            ),
+          )
+        }
+
+        function renderImport() {
+          return h(
+            'div',
+            { className: 'tplan-section' },
+            h('div', { className: 'tplan-sec-head' }, t('plan.import.title')),
+            h('textarea', {
+              className: 'tplan-textarea',
+              rows: 6,
+              value: importText,
+              placeholder: t('plan.import.placeholder'),
+              onChange: (event) => {
+                setImportText(event.target.value)
+                setPreview(null)
+                setConfirmedInferred(false)
+              },
+            }),
+            h(
+              'div',
+              { className: 'tplan-row' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'tplan-btn',
+                  disabled: busy || importText.trim() === '',
+                  onClick: parseImport,
+                },
+                t('plan.import.parse'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'tplan-btn',
+                  onClick: () => {
+                    setImportOpen(false)
+                    setPreview(null)
+                    setErrorText('')
+                  },
+                },
+                t('plan.cancel'),
+              ),
+            ),
+            renderPreview(),
+          )
+        }
+
+        function renderList() {
+          if (phase === 'loading') return h('div', { className: 'tplan-empty' }, t('plan.loading'))
+          if (phase === 'error') {
+            return h(
+              'div',
+              { className: 'tplan-empty' },
+              h('div', null, t('plan.load.fail')),
+              h('button', { type: 'button', className: 'tplan-btn', onClick: () => void loadProjects(false) }, t('plan.retry')),
+            )
+          }
+          if (projects.length === 0) {
+            return h(
+              'div',
+              { className: 'tplan-empty' },
+              h('div', { className: 'tplan-empty-title' }, t('plan.empty.title')),
+              h('div', null, t('plan.empty.hint')),
+            )
+          }
+          return projects.map((project) =>
+            h(
+              'button',
+              { key: project.id, type: 'button', className: 'tplan-item', onClick: () => selectProject(project.id) },
+              h(
+                'div',
+                { className: 'tplan-item-name' },
+                project.name,
+                project.pendingProposalCount > 0
+                  ? h('span', { className: 'tplan-badge' }, fill2(t('plan.badge.pending'), { n: project.pendingProposalCount }))
+                  : null,
+              ),
+              h('div', { className: 'tplan-item-goal' }, project.goal || t('plan.none')),
+              h(
+                'div',
+                { className: 'tplan-item-meta' },
+                h('span', null, statusText(t, project.status, PROJECT_STATUS_LABEL)),
+                h('span', null, `${t('plan.phases')} ${project.phaseCount}`),
+                h('span', null, `${t('plan.current')}: ${project.currentPhaseNumber ?? t('plan.current.none')}`),
+                h('span', null, fill2(t('plan.version'), { n: project.version })),
+              ),
+            ),
+          )
+        }
+
+        function renderCurrentPhase(project) {
+          return h(
+            'div',
+            { className: 'tplan-section', key: 'current' },
+            h('div', { className: 'tplan-sec-head' }, t('plan.current')),
+            h(
+              'div',
+              { className: 'tplan-row' },
+              h(
+                'select',
+                {
+                  className: 'tplan-select',
+                  value: project.currentPhaseId ?? '',
+                  disabled: busy,
+                  onChange: (event) => setCurrent(event.target.value),
+                },
+                h('option', { value: '' }, t('plan.current.none')),
+                ...project.phases.map((item) =>
+                  h('option', { key: item.pid, value: item.pid }, `${item.number} ${item.title}`),
+                ),
+              ),
+            ),
+          )
+        }
+
+        function renderPhase(project, target, depth, byPid) {
+          const deps = (target.dependsOn ?? []).map((pid) => byPid.get(pid)?.number ?? pid)
+          const isCurrent = project.currentPhaseId === target.pid
+          return h(
+            'div',
+            {
+              key: target.pid,
+              className: 'tplan-phase',
+              'data-current': isCurrent ? 'true' : 'false',
+              style: { marginLeft: `${Math.min(depth, 6) * 12}px` },
+            },
+            h(
+              'div',
+              { className: 'tplan-phase-head' },
+              h('span', { className: 'tplan-num' }, target.number),
+              h('span', { className: 'tplan-phase-title' }, target.title),
+              h('span', { className: 'tplan-status', 'data-status': target.status }, statusText(t, target.status, PLAN_STATUS_LABEL)),
+            ),
+            h(
+              'div',
+              { className: 'tplan-phase-meta' },
+              deps.length === 0
+                ? t('plan.phaseMetaNone')
+                : fill2(t('plan.phaseMeta'), { deps: deps.join(', '), n: (target.acceptance ?? []).length }),
+            ),
+            h(
+              'div',
+              { className: 'tplan-actions' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'tplan-action',
+                  disabled: busy || target.status === 'split',
+                  onClick: () => void startPhase(target),
+                },
+                t('plan.start'),
+              ),
+              h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => void insertHandoff(target) }, t('plan.insert')),
+              h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => openEdit(project, target) }, t('plan.edit')),
+              h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => openSplit(target) }, t('plan.split')),
+              h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => openResult(target) }, t('plan.result')),
+              h(
+                'select',
+                {
+                  className: 'tplan-select',
+                  disabled: busy || target.status === 'split',
+                  value: target.status,
+                  onChange: (event) => changeStatus(target, event.target.value),
+                },
+                ...['pending', 'active', 'blocked', 'done', 'dropped'].map((value) =>
+                  h('option', { key: value, value }, statusText(t, value, PLAN_STATUS_LABEL)),
+                ),
+              ),
+            ),
+            form !== null && form.pid === target.pid && form.mode !== 'add' ? renderPhaseForm() : null,
+          )
+        }
+
+        function renderProjectsSections(project) {
+          const blocks = []
+          const decisions = (project.decisions ?? []).map((item) => item.text)
+          if (decisions.length > 0) {
+            blocks.push(
+              h(
+                'div',
+                { className: 'tplan-section', key: 'decisions' },
+                h('div', { className: 'tplan-sec-head' }, t('plan.decisions')),
+                ...decisions.map((text, index) => h('div', { key: `decision-${index}`, className: 'tplan-goal' }, `- ${text}`)),
+              ),
+            )
+          }
+          const risks = (project.risks ?? []).map((item) => item.text)
+          if (risks.length > 0) {
+            blocks.push(
+              h(
+                'div',
+                { className: 'tplan-section', key: 'risks' },
+                h('div', { className: 'tplan-sec-head' }, t('plan.risks')),
+                ...risks.map((text, index) => h('div', { key: `risk-${index}`, className: 'tplan-goal' }, `- ${text}`)),
+              ),
+            )
+          }
+          const sources = (project.sources ?? []).map((source) => {
+            const where = source.where?.file ?? (source.where?.sessionId === undefined ? '' : `session ${source.where.sessionId}`)
+            return `${source.sid} [${source.kind}] ${source.label}${where === '' ? '' : ` — ${where}`}`
+          })
+          if (sources.length > 0) {
+            blocks.push(
+              h(
+                'div',
+                { className: 'tplan-section', key: 'sources' },
+                h('div', { className: 'tplan-sec-head' }, t('plan.sources')),
+                ...sources.map((text, index) => h('div', { key: `source-${index}`, className: 'tplan-source' }, `- ${text}`)),
+              ),
+            )
+          }
+          return blocks
+        }
+
+        function renderProposals() {
+          const pending = proposals.filter((item) => item.status !== 'applied' && item.status !== 'rejected')
+          if (pending.length === 0) return null
+          return h(
+            'div',
+            { className: 'tplan-section', key: 'proposals' },
+            h('div', { className: 'tplan-sec-head' }, `${t('plan.proposals')} (${pending.length})`),
+            ...pending.map((proposal) =>
+              h(
+                'div',
+                { key: proposal.id, className: 'tplan-listline' },
+                `${proposal.kind} · ${proposal.reason || ''}`,
+                h(
+                  'div',
+                  { className: 'tplan-row' },
+                  h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) }, t('plan.apply')),
+                  h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) }, t('plan.reject')),
+                ),
+              ),
+            ),
+          )
+        }
+
+        function renderChanges() {
+          if (changes.length === 0) return null
+          return h(
+            'div',
+            { className: 'tplan-section', key: 'changes' },
+            h(
+              'div',
+              { className: 'tplan-sec-head' },
+              h(
+                'button',
+                { type: 'button', className: 'tplan-btn', onClick: () => setShowChanges((open) => !open) },
+                `${t('plan.changes')} (${changes.length})`,
+              ),
+            ),
+            showChanges
+              ? h(
+                  'div',
+                  null,
+                  ...changes
+                    .slice()
+                    .reverse()
+                    .slice(0, 20)
+                    .map((change) =>
+                      h(
+                        'div',
+                        { key: change.id, className: 'tplan-change' },
+                        `${fill2(t('plan.change.v'), { n: change.version })} · ${change.kind}${change.reason ? ` · ${change.reason}` : ''} · ${timeAgo(t, change.at)}`,
+                      ),
+                    ),
+                )
+              : null,
+          )
+        }
+
+        function renderDetail() {
+          const project = detail
+          if (project === null) return h('div', { className: 'tplan-empty' }, t('plan.loading'))
+          const tree = planTree(project.phases)
+          const byPid = new Map(project.phases.map((item) => [item.pid, item]))
+          return [
+            h(
+              'div',
+              { className: 'tplan-bar', key: 'bar' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'tplan-btn',
+                  onClick: () => {
+                    setSelectedId(null)
+                    setDetail(null)
+                    setForm(null)
+                    setExportPath('')
+                  },
+                },
+                t('plan.back'),
+              ),
+              h('div', { className: 'tplan-name' }, project.name),
+              h('button', { type: 'button', className: 'tplan-btn', disabled: busy, onClick: exportPlan }, t('plan.export')),
+            ),
+            h(
+              'div',
+              { className: 'tplan-item-meta', key: 'meta' },
+              h('span', null, statusText(t, project.status, PROJECT_STATUS_LABEL)),
+              h('span', null, fill2(t('plan.version'), { n: project.version })),
+              h('span', null, `${t('plan.phases')} ${project.phases.length}`),
+            ),
+            exportPath !== ''
+              ? h('div', { className: 'tplan-hint', key: 'export' }, fill2(t('plan.export.done'), { path: exportPath }))
+              : null,
+            h(
+              'div',
+              { className: 'tplan-section', key: 'goal' },
+              h('div', { className: 'tplan-sec-head' }, t('plan.goal')),
+              h('div', { className: 'tplan-goal' }, project.goal || t('plan.none')),
+            ),
+            renderCurrentPhase(project),
+            h(
+              'div',
+              { className: 'tplan-section', key: 'phases' },
+              h(
+                'div',
+                { className: 'tplan-sec-head' },
+                t('plan.phases'),
+                h(
+                  'button',
+                  { type: 'button', className: 'tplan-btn', style: { marginLeft: 'auto' }, disabled: busy, onClick: openAdd },
+                  t('plan.addPhase'),
+                ),
+              ),
+              ...tree.map((entry) => renderPhase(project, entry.phase, entry.depth, byPid)),
+              form !== null && form.mode === 'add' ? renderPhaseForm() : null,
+            ),
+            ...renderProjectsSections(project),
+            renderProposals(),
+            renderChanges(),
+          ]
+        }
+
+        return h(
+          'div',
+          { className: 'tplan-root' },
+          h(
+            'div',
+            { className: 'tplan-head' },
+            h(
+              'select',
+              {
+                className: 'tplan-scope',
+                value: scope ?? '',
+                onChange: (event) => {
+                  setScopePick(event.target.value)
+                  setSelectedId(null)
+                  setDetail(null)
+                  setImportOpen(false)
+                  setPreview(null)
+                },
+              },
+              ...workspaceRows.map((workspace) => h('option', { key: workspace.path, value: workspace.path }, workspace.path)),
+              currentPath !== '' && !workspaceRows.some((workspace) => workspace.path === currentPath)
+                ? h('option', { key: currentPath, value: currentPath }, currentPath)
+                : null,
+              h('option', { value: SCOPE_ALL }, t('plan.scope.all')),
+              h('option', { value: SCOPE_INBOX }, t('plan.scope.inbox')),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'tplan-btn',
+                onClick: () => {
+                  setImportOpen((open) => !open)
+                  setPreview(null)
+                  setErrorText('')
+                },
+              },
+              t('plan.import'),
+            ),
+            h('span', { className: 'tplan-busy', 'data-on': busy ? 'true' : 'false', 'aria-hidden': 'true' }),
+          ),
+          errorText !== '' ? h('div', { className: 'tplan-err' }, errorText) : null,
+          importOpen ? renderImport() : null,
+          h('div', { className: 'tplan-body' }, detail === null ? renderList() : renderDetail()),
+        )
+      }
+
       ctx.effect(
         () =>
           ctx.sidebarRightTabs.register({
@@ -2775,6 +4138,25 @@ Keep in mind
             ],
           }),
         'todo-assistant: tab type',
+      )
+
+      ctx.effect(
+        () =>
+          ctx.sidebarRightTabs.register({
+            id: PLAN_ID,
+            kind: PLAN_ID,
+            priority: 'extension',
+            title: () => t('planTab.title'),
+            guide: [
+              {
+                id: PLAN_ID,
+                order: 41,
+                title: () => t('planTab.title'),
+                description: () => t('planTab.description'),
+              },
+            ],
+          }),
+        'todo-assistant: plan tab type',
       )
 
       /** Never leave a blank pane: surface a render failure inside the tab. */
@@ -2806,6 +4188,12 @@ Keep in mind
       ctx.slots.inject('sidebar.right.pane.tab', () =>
         ctx.slots.register({ name: 'sidebar.right.pane.tab', key: ID }, function TodoTab(props) {
           return h(TodoBoundary, null, h(TodoPanel, props))
+        }),
+      )
+
+      ctx.slots.inject('sidebar.right.pane.tab', () =>
+        ctx.slots.register({ name: 'sidebar.right.pane.tab', key: PLAN_ID }, function PlanTab(props) {
+          return h(TodoBoundary, null, h(PlanPanel, props))
         }),
       )
 

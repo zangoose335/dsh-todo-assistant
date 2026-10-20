@@ -12,7 +12,18 @@
 import { findDuplicate } from './dedupe.js'
 import { filesFromToolCall } from './detect.js'
 import { BRIEF_BASES, BRIEF_IMPACTS, BRIEF_LIMITS } from './brief.js'
-import { CAPTURE_LIMITS, STATUSES, TodoInputError, assembleCapture, labelOf, mintId, normalizeTouchedPath, projectFull } from './domain.js'
+import {
+  CAPTURE_LIMITS,
+  INBOX,
+  STATUSES,
+  TodoInputError,
+  assembleCapture,
+  labelOf,
+  mintId,
+  normalizeTouchedPath,
+  projectFull,
+  renderPhaseContextText,
+} from './domain.js'
 import { extractTodoBlocks } from './marker.js'
 
 /** Wire name of the tool. */
@@ -861,6 +872,203 @@ export function createTodoListTool({ defineTool, store, resolveWorkspace }) {
         .filter((record) => statuses.includes(record.status))
         .map((record) => ({ id: record.id, label: labelOf(record).label, title: record.title, status: record.status, kind: record.kind }))
       return { items, total: items.length, workspace }
+    },
+  })
+}
+
+/**
+ * `todo_plan_read` — read-only view over project plans (PLAN.md §B2 item 7).
+ *
+ * It never writes: phase changes go through the `plan.phase.*` endpoints (the
+ * developer/UI today, a proposal in C). Three shapes keep the answer small: the
+ * workspace's plan list, one full project, or one phase with its direct
+ * dependencies.
+ *
+ * @param options - injected dependencies.
+ * @param options.defineTool - `defineTool` from `@deepseek-ai/dsh-tools`.
+ * @param options.store - the todo store (projects included).
+ * @param options.resolveWorkspace - session cwd → workspace key.
+ * @returns the `todo_plan_read` definition.
+ */
+export function createTodoPlanReadTool({ defineTool, store, resolveWorkspace }) {
+  const truncate = (value, limit) => {
+    const text = String(value ?? '')
+    const chars = [...text]
+    return chars.length > limit ? `${chars.slice(0, limit).join('')}…` : text
+  }
+
+  return defineTool({
+    name: 'todo_plan_read',
+    description: [
+      'Read project plans: list the plans for this workspace, or read one project with its phases, dependency graph, acceptance criteria, and recorded execution results.',
+      'Read-only: it never creates or changes a plan. Omit projectId to list plans; pass projectId for the full plan; add phaseId to focus on one phase and its direct dependencies.',
+      'Phases are numbered like 4a; those display numbers are not card labels.',
+    ].join(' '),
+    parameters: {
+      projectId: { type: 'string', description: 'Project id (pj_…). Omit to list this workspace’s plans.' },
+      phaseId: { type: 'string', description: 'Optional phase pid (ph_…) to focus on one phase of that project.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          shape: { type: 'string', required: true, enum: ['projects', 'project', 'phase'] },
+          workspace: { type: 'string' },
+          count: { type: 'integer' },
+          projects: { type: 'json' },
+          project: { type: 'json' },
+          phase: { type: 'json' },
+          dependencies: { type: 'json' },
+          currentPhase: { type: 'json' },
+        },
+      },
+      render: (_args, value) => {
+        if (value.shape === 'projects') {
+          const lines = [`${value.count} project(s) in ${value.workspace}:`]
+          for (const item of value.projects ?? []) {
+            lines.push(
+              `${item.id}「${item.name}」 ${item.status} · 阶段 ${item.phaseCount} · 当前 ${item.currentPhaseNumber ?? '—'} · v${item.version}`,
+            )
+          }
+          if ((value.projects ?? []).length === 0) lines.push('(none)')
+          lines.push('Read one with todo_plan_read {projectId}.')
+          return [{ type: 'text', text: lines.join('\n') }]
+        }
+        if (value.shape === 'phase') {
+          const phase = value.phase ?? {}
+          const lines = [`plan ${value.project?.id ?? ''}「${value.project?.name ?? ''}」 · phase ${phase.number} ${phase.title} [${phase.status}]`]
+          if (phase.goal) lines.push(`goal: ${phase.goal}`)
+          if (phase.nextStep) lines.push(`next: ${phase.nextStep}`)
+          if (phase.parentPid !== undefined) lines.push(`parent: ${phase.parentPid}`)
+          const dependencies = value.dependencies ?? []
+          lines.push(
+            dependencies.length === 0
+              ? 'depends on: (none)'
+              : `depends on: ${dependencies.map((dep) => `${dep.number} ${dep.title} [${dep.status}]`).join('; ')}`,
+          )
+          for (const item of phase.acceptance ?? []) lines.push(`acceptance: ${item.text}`)
+          for (const item of phase.decisions ?? []) lines.push(`decision: ${item.text}`)
+          if (phase.result !== undefined) {
+            lines.push(`result [${phase.result.verification}]: ${truncate(phase.result.summary, 400)}`)
+            for (const test of phase.result.tests ?? []) {
+              lines.push(`test ${test.status}${test.command ? `: ${test.command}` : ''} (${test.verification})`)
+            }
+          }
+          return [{ type: 'text', text: lines.join('\n') }]
+        }
+        const project = value.project ?? {}
+        const lines = [
+          `plan ${project.id}「${project.name}」 ${project.status} · v${project.version} · 阶段 ${project.phaseCount}`,
+          `goal: ${project.goal ?? ''}`,
+        ]
+        if (project.currentPhase !== null && project.currentPhase !== undefined) {
+          lines.push(`current: ${project.currentPhase.number} ${project.currentPhase.title} [${project.currentPhase.status}]`)
+        }
+        for (const phase of project.phases ?? []) {
+          const deps = (phase.dependsOn ?? []).length === 0 ? '' : ` ← ${phase.dependsOn.join(', ')}`
+          const parent = phase.parentPid === undefined ? '' : ` (parent ${phase.parentPid})`
+          lines.push(`- ${phase.number} ${phase.title} [${phase.status}]${deps}${parent} · 验收 ${(phase.acceptance ?? []).length}`)
+          if (phase.result !== undefined) lines.push(`  result [${phase.result.verification}]: ${truncate(phase.result.summary, 160)}`)
+        }
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    async execute(args, exec) {
+      const projectId = typeof args?.projectId === 'string' ? args.projectId.trim() : ''
+      const phaseId = typeof args?.phaseId === 'string' ? args.phaseId.trim() : ''
+      if (projectId === '') {
+        if (phaseId !== '') {
+          throw new TodoInputError('plan/project-required', '给出 phaseId 时也必须给 projectId')
+        }
+        const cwd = typeof exec?.agent?.session?.header?.cwd === 'string' ? exec.agent.session.header.cwd : ''
+        const workspace = typeof resolveWorkspace === 'function' ? await resolveWorkspace(cwd) : INBOX
+        const projects = store
+          .allProjects()
+          .filter((record) => record.workspace === workspace)
+          .map((record) => store.projectRow(record))
+        return { shape: 'projects', workspace, count: projects.length, projects }
+      }
+      const record = store.findProject(projectId)
+      if (record === undefined) {
+        throw new TodoInputError('plan/not-found', `no project ${projectId} (pass the pj_ id)`)
+      }
+      const project = store.projectDetail(record)
+      if (phaseId === '') {
+        return { shape: 'project', project, currentPhase: project.currentPhase }
+      }
+      const phase = project.phases.find((entry) => entry.pid === phaseId)
+      if (phase === undefined) {
+        throw new TodoInputError('plan/phase-not-found', `no phase ${phaseId} in project ${projectId}`)
+      }
+      const dependencies = (phase.dependsOn ?? []).map((pid) => {
+        const dep = project.phases.find((entry) => entry.pid === pid)
+        return { pid, number: dep?.number ?? '', title: dep?.title ?? '', status: dep?.status ?? 'missing' }
+      })
+      return {
+        shape: 'phase',
+        project: {
+          id: project.id,
+          name: project.name,
+          goal: project.goal,
+          status: project.status,
+          version: project.version,
+          currentPhaseId: project.currentPhaseId ?? null,
+        },
+        phase,
+        dependencies,
+        currentPhase: project.currentPhase,
+      }
+    },
+  })
+}
+
+/**
+ * `todo_plan_context` — the phase handoff seed (PLAN.md §B4).
+ *
+ * Read-only. It returns the structured pack and renders the opening text a
+ * fresh session gets: project goal, the phase goal/next step, the actual results
+ * of its direct prerequisites, decisions, acceptance, risks, source pointers,
+ * workspace rules, and how to handle conflicts. Bodies of history/documents are
+ * never included; sources stay pointers.
+ *
+ * @param options - injected dependencies.
+ * @param options.defineTool - `defineTool` from `@deepseek-ai/dsh-tools`.
+ * @param options.store - the todo store (projects included).
+ * @returns the `todo_plan_context` definition.
+ */
+export function createTodoPlanContextTool({ defineTool, store }) {
+  return defineTool({
+    name: 'todo_plan_context',
+    description: [
+      'Build the handoff for one phase of a project plan: project goal, the phase goal and next step, the actual results of its direct prerequisite phases, decisions, acceptance criteria, risks, source pointers, and workspace rules.',
+      'Read-only. Call it when the developer starts working on a phase, or asks what context a new session would get. Omit phaseId to use the project’s current phase.',
+      'It never includes history or document bodies; after reading it, verify the referenced files yourself and report conflicts instead of silently trusting stale paths.',
+    ].join(' '),
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Project id (pj_…).' },
+      phaseId: { type: 'string', description: 'Phase pid (ph_…); omitted uses the project’s current phase.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          shape: { type: 'string', required: true, enum: ['context'] },
+          pack: { type: 'json', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: renderPhaseContextText(value.pack) }],
+    },
+    async execute(args) {
+      const projectId = typeof args?.projectId === 'string' ? args.projectId.trim() : ''
+      if (projectId === '') throw new TodoInputError('plan/project-required', 'projectId 不能为空')
+      const record = store.findProject(projectId)
+      if (record === undefined) {
+        throw new TodoInputError('plan/not-found', `no project ${projectId} (pass the pj_ id)`)
+      }
+      const phaseId = typeof args?.phaseId === 'string' ? args.phaseId.trim() : ''
+      return { shape: 'context', pack: store.planContext(record.id, phaseId === '' ? undefined : phaseId) }
     },
   })
 }

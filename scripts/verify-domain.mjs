@@ -121,7 +121,7 @@ async function main() {
     console.log('\n§10.2 domain declaration and open')
     const spec = createTodoSpec({ z, defineDomain: storageDomain.defineDomain, domainTable: storageDomain.domainTable })
     checkEqual('domain name', spec.name, 'todo_assistant')
-    checkEqual('declared tables', Object.keys(spec.tables), ['todos', 'rules'])
+    checkEqual('declared tables', Object.keys(spec.tables), ['todos', 'rules', 'projects', 'plan_proposals', 'plan_changes'])
 
     const domain = await ctx.storageDomain.open(spec)
     check('open() returns a handle with a todos table', domain != null && domain.table('todos') != null)
