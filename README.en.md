@@ -201,6 +201,11 @@ sessions. It sits beside the card page and does not change it.
     observed runs the AI omitted are appended. Nothing is written until you
     press Apply in the Plan page; ticking "I checked these test results" marks
     tests without tool evidence as "developer".
+-   **Plan changes**: the AI may propose a new phase, a split, dependency
+    changes, or acceptance changes. The host computes the field-level diff and
+    the affected phases (the changed phases, everything downstream, and phases
+    sharing acceptance/decisions); the AI only explains why. A stale version is
+    rejected when proposing and again when applying.
 -   **Phase handoff**: "Start phase" opens a new session whose opening text
     carries the project goal, the phase goal/next step, the actual results of
     its direct prerequisite phases, decisions, acceptance, risks, unresolved
@@ -288,26 +293,30 @@ See `docs/GATE1-T5-ACCEPTANCE.md`.
 
 **Scope limits:** the old-plugin UI and storage write-back were exercised on a copy/test workspace, not a destructive drill on the real `~/.dsh`; S9 needs an explicit pointer to #6.25; S2 has a duplicate constraint and S7 is slightly above minimal. The real UI ten scenarios, real `todo_recall`, old-plugin UI, storage copy, and scenario 10 are verified.
 
-**Stage 4 (B1–B5, C1) evidence (2026-10-20):** `verify-plan` 73/73,
+**Stage 4 (B1–B5, C1–C2) evidence (2026-10-20):** `verify-plan` 74/74,
 `verify-phase` 66/66, `verify-import` 67/67, `verify-context` 46/46,
-`verify-client` 12/12, `verify-evidence` 32/32 — **785** checks in total
-together with the original five scripts, and `git diff --check` passes. The
-manual plan-page record is in [`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md);
-the C1 propose/reject/apply flow was also walked by hand.
+`verify-client` 12/12, `verify-evidence` 32/32, `verify-diff` 28/28 — **814**
+checks in total together with the original five scripts, and
+`git diff --check` passes. The manual plan-page record is in
+[`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md); the C1 propose/reject/apply
+flow and the C2 dependency diff/affected phases were also walked by hand.
 
-Stage 4's B1–B5 and C1 are complete (2026-10-20): the Project Plan model and
-its three tables, phases/dependencies/acceptance/status/results, deterministic
-Markdown import with confirmation, the phase context pack and read-only tools,
-the Plan page (a second right-sidebar entry), and export into the workspace
-folder. C1 adds the phase-result flow: the AI may only propose, only real tool
-results count as evidence, and nothing changes until the developer applies. The
+Stage 4's B1–B5 and C1–C2 are complete (2026-10-20): the Project Plan model
+and its three tables, phases/dependencies/acceptance/status/results,
+deterministic Markdown import with confirmation, the phase context pack and
+read-only tools, the Plan page (a second right-sidebar entry), and export into
+the workspace folder. C1 adds the phase-result flow: the AI may only propose,
+only real tool results count as evidence, and nothing changes until the
+developer applies. C2 adds field-level diffs, affected phases, and four
+plan-change proposals. The
 developer walked the Plan page through import, split, current phase, start
 phase, insert handoff and export by hand; the card page was not changed.
 
-Still **not implemented**: C2–C4 (plan diffs/affected phases, project-level
-proposal/confirmation, version history), D1–D3 (card/phase drag handoff), and
-E2–E4 (card steps and numbering). The Plan page has no project-level "propose a
-change" or project deletion yet; phase-result proposals are available; a Markdown
+Still **not implemented**: C3–C4 (generic project-level proposal/confirmation,
+version history and replay), D1–D3 (card/phase drag handoff), and E2–E4 (card
+steps and numbering). The Plan page has no project-level "propose a change" or
+project deletion yet; phase-result and phase-level change proposals are
+available; a Markdown
 round-trip does not keep test-evidence details; an older version writes back
 without `brief`/`sources` and drops the `projects`/`plan_proposals`/
 `plan_changes` tables — back up `~/.dsh/storages/todo_assistant.json` before

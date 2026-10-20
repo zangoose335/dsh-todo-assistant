@@ -586,7 +586,7 @@ AI:  [todo_add: 只填本待办相关字段]
 | M5 | 新开会话 / 插入当前会话 | ✅ |
 | M6 | `todo_recall` 目录 + 分页回读 | 可砍 |
 | M7 | 去重合并 | 可砍 |
-| S4 | Project Plan（B1–B5）与阶段结果证据（C1）：计划/阶段/导入导出/上下文包/计划 tab/结果提议 | ✅ 已完成（2026-10-20） |
+| S4 | Project Plan（B1–B5）、阶段结果证据（C1）与计划 diff（C2）：计划/阶段/导入导出/上下文包/计划 tab/结果与变化提议 | ✅ 已完成（2026-10-20） |
 
 M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真正省 token。
 
@@ -702,13 +702,13 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE2-REVIEW.md`、`docs/GATE3-REVIEW.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`。
 > 限制：旧插件/存储写回使用副本，未对真实 `~/.dsh` 做破坏性演练；S9 需明确指向 #6.25；S2 约束重复、S7 略多。
 
-> **Stage 4 的 B1–B5 与 C1 已完成（2026-10-20）**：Project Plan 三表与阶段模型、Markdown 导入导出与确认、阶段上下文包与只读工具、第二个“计划”页签、阶段结果与测试证据提议。
-> 测试：`verify-plan` 73/73、`verify-phase` 66/66、`verify-import` 67/67、`verify-context` 46/46、`verify-client` 12/12、`verify-evidence` 32/32，连同原有 5 个脚本共 **785** 项通过；计划页与 C1 提议/应用手工验收见 `docs/B5-ACCEPTANCE.md`。
-> C2–C4（diff/影响阶段、项目级提议/确认、版本历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
+> **Stage 4 的 B1–B5、C1–C2 已完成（2026-10-20）**：Project Plan 三表与阶段模型、Markdown 导入导出与确认、阶段上下文包与只读工具、第二个“计划”页签、阶段结果与测试证据提议、字段级 diff/受影响阶段与四种计划变化提议。
+> 测试：`verify-plan` 74/74、`verify-phase` 66/66、`verify-import` 67/67、`verify-context` 46/46、`verify-client` 12/12、`verify-evidence` 32/32、`verify-diff` 28/28，连同原有 5 个脚本共 **814** 项通过；计划页、C1 提议/应用、C2 diff/受影响阶段手工验收见 `docs/B5-ACCEPTANCE.md`。
+> C3–C4（项目级提议/确认、版本历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
 
-## 13. Project Plan（Stage 4，B1–B5、C1）
+## 13. Project Plan（Stage 4，B1–B5、C1–C2）
 
-> **状态（2026-10-20）：B1–B5 与 C1 已完成。** C2–C4、D1–D3、E2–E4 仍未实现。
+> **状态（2026-10-20）：B1–B5、C1–C2 已完成。** C3–C4、D1–D3、E2–E4 仍未实现。
 
 ### 13.1 范围与不变量
 
@@ -741,9 +741,10 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 - 项目：`plan.list/detail/create/patch/remove`；阶段：`plan.phase.add/update/remove/split/move/status/result`；提议：`plan.proposal.list/apply/reject`；历史与导出：`plan.change.list`、`plan.export`；导入：`plan.import.preview/commit`；交接：`plan.context`。
 - `plan.export` 默认返回 JSON 快照；`format:'markdown'` 返回文本；再给 `write:true` 时写入项目工作区并返回路径（不覆盖同名文件，收件箱拒绝）。
 - AI 侧只读工具：`todo_plan_read`（项目/阶段/依赖/验收/结果）和 `todo_plan_context`（阶段交接）。
-- AI 侧写入口只有 `todo_plan_propose`：它只写 `phase-result` 提议，不能应用；`plan.proposal.apply` 只给计划页（开发者），可带 `confirmTests`。
+- AI 侧写入口只有 `todo_plan_propose`：可写 `phase-result`、`phase-add`、`phase-split`、`dependency`、`acceptance` 提议，不能应用；`plan.proposal.apply` 只给计划页（开发者），可带 `confirmTests`。
 - 提议的 `baseVersion` 与项目当前版本不一致时返回 `plan/stale`；应用后版本 +1、追加历史、提议标记 applied。
 - `phase-result` 提议带 `phaseId`、`result` 和可选 `suggestedStatus`（建议状态与应用后的阶段状态分开存）；应用时可带 `confirmTests`。
+- 其他提议带 `payload`（新增/拆分/依赖/验收的规范化内容）；所有提议都由 host 写入 `diff` 与 `affectedPhaseIds`。
 
 ### 13.5 Markdown 导入/导出（B3）
 
@@ -757,12 +758,13 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 - 页面：项目列表（待处理提议角标）→ 项目详情（目标、当前阶段、阶段树、阶段操作、项目决策/风险/来源、待处理提议、变更历史）→ 导入面板（预览/确认/保存）→ 导出按钮。
 - 阶段操作：开始阶段（新会话 + 交接文本，会话打开后把阶段标为进行中）、插入交接（只预填输入框）、编辑（编号/标题/目标/下一步/依赖/验收/必须保留）、拆分（一行一个标题）、改状态、记录结果。
 - 提议面板：`phase-result` 显示阶段、结果、每条测试的证据级别（工具结果/开发者确认/AI 声称）、整体证据级别、建议状态和基于版本；“我确认这些测试结果”勾选后应用才把无工具证据的测试升级为开发者确认。
+- 其他提议显示 host 算出的字段级 diff（项目/阶段增删改、依赖、验收/必须保留/决策）与受影响阶段；`baseVersion` 与当前版本不一致时“应用”禁用并提示重新读取。
 - 4 秒静默轮询仅在页签可见时运行；错误显示在页内，不白屏。
 - 手工验收记录（A–E 路线图、导入/拆分/当前阶段/开始阶段/插入/导出/卡片页回归）见 `docs/B5-ACCEPTANCE.md`。
 
 ### 13.7 已知限制
 
-- 计划页暂无项目级“提出修改”（C2–C4）、删除项目、阶段重编号和拖拽排序（D/E）；阶段结果提议（C1）已可用。
+- 计划页暂无项目级“提出修改”（C3–C4）、删除项目、阶段重编号和拖拽排序（D/E）；阶段结果与阶段级变化提议（C1–C2）已可用。
 - 交接文本约 4000 字上限；超限会截断次要来源并提示 `todo_plan_read`。
 - 旧版本写回会丢掉 `projects`/`plan_proposals`/`plan_changes` 三张表（single-layout 只序列化自己声明的表）；升级前备份。
 
@@ -775,6 +777,16 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 - **应用**：`plan.proposal.apply` 由开发者在计划页触发；不勾确认时无工具证据的测试保持 `ai-claim`，勾选“我确认这些测试结果”则升级为 `developer`。应用写入 `phase.result`，可选写入建议状态，并记录一条 `phase-result` change；AI 没有应用入口。
 - **结果级证据**：有 `tool-result`/`developer` 证据且测试都通过 → `verified`；有失败 → `unverified`；没有证据 → `claimed`。
 - **已知限制**：只扫描当前会话；子会话执行的测试不在父会话记录里；命令识别是启发式，认不出的测试命令按 `ai-claim` 处理；一条提议里的测试最多 20 条。
+
+---
+
+### 13.9 计划变化与 diff（C2）
+
+- **diff 由 host 计算**：`plan-diff.js` 对比改前/改后快照，输出项目字段（名字/目标/状态/当前阶段）、阶段新增/删除/修改（编号/标题/目标/状态/父级/下一步/结果的字段级前后值）、依赖增删、验收/必须保留/决策条目的增删、项目决策/风险/来源变化。
+- **受影响阶段**：改动阶段本身 → 反向依赖闭包（所有直接/间接依赖它的阶段）→ 与改动阶段共享验收/必须保留/决策文字的阶段；当前阶段变化时也纳入。按改后阶段的显示顺序返回，不采信 AI 自报。
+- **四种新提议**：`phase-add`（可挂父阶段/编号/依赖/验收）、`phase-split`、`dependency`、`acceptance`；提议只写 proposal，应用仍是开发者在计划页点击。
+- **过期**：`baseVersion` 与项目当前版本不一致时，提议时直接 `plan/stale`，应用时再拦一次；无变化提议返回 `plan/no-change`。
+- **存储**：提议保存规范化 `payload`、host 计算的 `diff` 与 `affectedPhaseIds`；变更历史仍沿用现有 shape（版本重放与历史 diff 升级留给 C4）。
 
 ---
 
