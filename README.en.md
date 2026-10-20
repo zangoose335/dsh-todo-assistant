@@ -211,6 +211,12 @@ sessions. It sits beside the card page and does not change it.
     proposals. Applying takes a second "Confirm apply" click; applied/rejected
     proposals stay in the proposal history, the change log shows who applied it
     and a human-readable kind, and diff additions/removals are green/red.
+-   **Version and decision history**: open a change to see its diff, view the
+    initial plan and "initial vs current", page through history, and browse a
+    decision timeline of decision/risk additions and removals. History stores
+    structured summaries only, so arbitrary intermediate versions cannot be
+    rebuilt. Export carries a change summary by default (version/kind/reason/
+    affected phases) and can include the full diff on request.
 -   **Phase handoff**: "Start phase" opens a new session whose opening text
     carries the project goal, the phase goal/next step, the actual results of
     its direct prerequisite phases, decisions, acceptance, risks, unresolved
@@ -298,16 +304,17 @@ See `docs/GATE1-T5-ACCEPTANCE.md`.
 
 **Scope limits:** the old-plugin UI and storage write-back were exercised on a copy/test workspace, not a destructive drill on the real `~/.dsh`; S9 needs an explicit pointer to #6.25; S2 has a duplicate constraint and S7 is slightly above minimal. The real UI ten scenarios, real `todo_recall`, old-plugin UI, storage copy, and scenario 10 are verified.
 
-**Stage 4 (B1–B5, C1–C3) evidence (2026-10-20):** `verify-plan` 74/74,
+**Stage 4 (B1–B5, C1–C4) evidence (2026-10-20):** `verify-plan` 74/74,
 `verify-phase` 66/66, `verify-import` 67/67, `verify-context` 46/46,
 `verify-client` 12/12, `verify-evidence` 32/32, `verify-diff` 28/28,
-`verify-propose` 20/20 — **834** checks in total together with the original five
-scripts, and `git diff --check` passes. The manual plan-page record is in
-[`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md); the C1 propose/reject/apply
-flow, the C2 dependency diff/affected phases, and the C3 project-level
-proposal/two-step apply/history were also walked by hand.
+`verify-propose` 20/20, `verify-history` 31/31 — **865** checks in total
+together with the original five scripts, and `git diff --check` passes. The
+manual plan-page record is in [`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md);
+the C1 propose/reject/apply flow, the C2 dependency diff/affected phases, the C3
+project-level proposal/two-step apply/history, and C4's version/initial/decision
+views were also walked by hand.
 
-Stage 4's B1–B5 and C1–C3 are complete (2026-10-20): the Project Plan model
+Stage 4's B1–B5 and C1–C4 are complete (2026-10-20): the Project Plan model
 and its three tables, phases/dependencies/acceptance/status/results,
 deterministic Markdown import with confirmation, the phase context pack and
 read-only tools, the Plan page (a second right-sidebar entry), and export into
@@ -315,14 +322,16 @@ the workspace folder. C1 adds the phase-result flow: the AI may only propose,
 only real tool results count as evidence, and nothing changes until the
 developer applies. C2 adds field-level diffs, affected phases, and four
 plan-change proposals. C3 adds six project-level proposals, two-step apply,
-proposal history, and colored diffs. The
+proposal history, and colored diffs. C4 adds summary-based version history,
+initial/current comparison, decision history, pagination, and summary export. The
 developer walked the Plan page through import, split, current phase, start
 phase, insert handoff and export by hand; the card page was not changed.
 
-Still **not implemented**: C4 (version history and replay), D1–D3 (card/phase
-drag handoff), and E2–E4 (card steps and numbering). The Plan page has no
-project deletion or phase title/goal edit/remove proposals yet; project-field,
-phase-result and phase-level change proposals are available; a Markdown
+Still **not implemented**: D1–D3 (card/phase drag handoff) and E2–E4 (card
+steps and numbering). The Plan page has no project deletion or phase title/goal
+edit/remove proposals yet; arbitrary intermediate versions cannot be rebuilt
+(history is summary-only; initial/current/initial-vs-current and single changes
+are available); a Markdown
 round-trip does not keep test-evidence details; an older version writes back
 without `brief`/`sources` and drops the `projects`/`plan_proposals`/
 `plan_changes` tables — back up `~/.dsh/storages/todo_assistant.json` before
@@ -387,6 +396,8 @@ see:
     pairing, proposals and apply
 -   [`scripts/verify-propose.mjs`](scripts/verify-propose.mjs): project-level
     proposals, apply/reject and audit
+-   [`scripts/verify-history.mjs`](scripts/verify-history.mjs): version
+    summaries, initial/current comparison, decision timeline and export
 -   [`scripts/fixtures/plan-a-e.md`](scripts/fixtures/plan-a-e.md): A–E roadmap
     import fixture
 
