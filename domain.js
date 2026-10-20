@@ -71,7 +71,7 @@ export const PROPOSAL_STATUSES = ['pending', 'applied', 'rejected']
  * Proposal kinds B1 accepts. B2/C2 add `phase-add`, `phase-split`,
  * `dependency`, `acceptance`, … — stored proposals keep their recorded kind.
  */
-export const PROPOSAL_KINDS = ['project-patch']
+export const PROPOSAL_KINDS = ['project-patch', 'phase-result']
 
 /**
  * Change kinds recorded in `plan_changes`. B2 adds the phase write operations;
@@ -315,7 +315,13 @@ export function createTodoSpec({ z, defineDomain, domainTable }) {
     /** The project version the proposal was computed against (PLAN.md §C2). */
     baseVersion: z.number().int(),
     kind: z.enum(PROPOSAL_KINDS).default('project-patch'),
-    patch: projectPatch,
+    /** `project-patch` payload; absent on `phase-result` proposals. */
+    patch: projectPatch.optional(),
+    /** `phase-result` payload: the phase, its result, and an optional target status. */
+    phaseId: z.string().optional(),
+    result: phaseResult.optional(),
+    /** A suggested phase status; the proposal's own lifecycle stays `status`. */
+    suggestedStatus: z.enum(PHASE_STATUSES).optional(),
     reason: z.string().default(''),
     proposedBySession: z.string().default(''),
     status: z.enum(PROPOSAL_STATUSES).default('pending'),
@@ -1269,6 +1275,19 @@ export function recordPhaseResultInProject(project, phaseId, result, at, { limit
 // The structured pack is the single source of fields; the client renders the
 // localized seed in B5 and the tool renders the text below. Neither carries
 // history bodies: sources stay pointers.
+
+/**
+ * Normalize an untrusted phase result for a proposal or a direct write.
+ *
+ * @param input - untrusted result payload.
+ * @param at - fallback timestamps.
+ * @param options - `limits` override.
+ * @returns the complete `PhaseResult`.
+ * @throws {TodoInputError} with a `plan/*` code.
+ */
+export function normalizePhaseResultInput(input, at, { limits = PLAN_LIMITS } = {}) {
+  return normalizePhaseResult(input, at, limits)
+}
 
 /**
  * Build the handoff pack for one phase.

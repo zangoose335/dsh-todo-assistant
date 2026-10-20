@@ -34,6 +34,16 @@ window.__ModuleLoader__.load({
       done: 'plan.projstatus.done',
       dropped: 'plan.projstatus.dropped',
     }
+    const RESULT_VERIFICATION_LABEL = {
+      claimed: 'plan.verification.claimed',
+      verified: 'plan.verification.verified',
+      unverified: 'plan.verification.unverified',
+    }
+    const TEST_VERIFICATION_LABEL = {
+      'tool-result': 'plan.test.toolResult',
+      developer: 'plan.test.developer',
+      'ai-claim': 'plan.test.aiClaim',
+    }
     /** UI sentinels; the host only ever sees a workspace path or `inbox`. */
     const SCOPE_INBOX = '@inbox'
     const SCOPE_ALL = '@all'
@@ -322,6 +332,23 @@ window.__ModuleLoader__.load({
       'plan.insert.fail': '当前没有可用的输入框',
       'plan.proposals': '待处理提议',
       'plan.proposals.none': '没有待处理提议',
+      'plan.proposals.resultTitle': '阶段结果提议',
+      'plan.proposals.tests': '测试',
+      'plan.proposals.moreTests': '还有 {n} 条',
+      'plan.proposals.confirmTests': '我确认这些测试结果',
+      'plan.proposals.suggestStatus': '建议状态',
+      'plan.proposals.baseVersion': '基于第 {n} 版',
+      'plan.proposals.evidence': '证据级别',
+      'plan.completed': '已完成',
+      'plan.files': '文件',
+      'plan.phaseResult': '结果：{summary}',
+      'plan.testsCount': '{n} 条测试',
+      'plan.verification.claimed': '声称',
+      'plan.verification.verified': '已验证',
+      'plan.verification.unverified': '未验证',
+      'plan.test.toolResult': '工具结果',
+      'plan.test.developer': '开发者确认',
+      'plan.test.aiClaim': 'AI 声称',
       'plan.apply': '应用',
       'plan.reject': '拒绝',
       'plan.changes': '变更历史',
@@ -594,6 +621,23 @@ Keep in mind
       'plan.insert.fail': 'No composer is available',
       'plan.proposals': 'Pending proposals',
       'plan.proposals.none': 'No pending proposals',
+      'plan.proposals.resultTitle': 'Phase result proposal',
+      'plan.proposals.tests': 'Tests',
+      'plan.proposals.moreTests': '{n} more',
+      'plan.proposals.confirmTests': 'I checked these test results',
+      'plan.proposals.suggestStatus': 'Suggested status',
+      'plan.proposals.baseVersion': 'based on v{n}',
+      'plan.proposals.evidence': 'Evidence',
+      'plan.completed': 'Completed',
+      'plan.files': 'Files',
+      'plan.phaseResult': 'Result: {summary}',
+      'plan.testsCount': '{n} test(s)',
+      'plan.verification.claimed': 'claimed',
+      'plan.verification.verified': 'verified',
+      'plan.verification.unverified': 'unverified',
+      'plan.test.toolResult': 'tool result',
+      'plan.test.developer': 'developer',
+      'plan.test.aiClaim': 'AI claim',
       'plan.apply': 'Apply',
       'plan.reject': 'Reject',
       'plan.changes': 'Change history',
@@ -3203,6 +3247,7 @@ Keep in mind
         const [exportPath, setExportPath] = React.useState('')
         const [form, setForm] = React.useState(null)
         const [showChanges, setShowChanges] = React.useState(false)
+        const [confirmTests, setConfirmTests] = React.useState({})
         const busyRef = React.useRef(false)
         const selectedRef = React.useRef(null)
 
@@ -3302,6 +3347,7 @@ Keep in mind
           setForm(null)
           setExportPath('')
           setShowChanges(false)
+          setConfirmTests({})
           setErrorText('')
         }
 
@@ -3434,7 +3480,10 @@ Keep in mind
         function applyProposal(proposal) {
           if (detail === null) return
           void run(async () => {
-            await call('plan.proposal.apply', { id: proposal.id })
+            await call('plan.proposal.apply', {
+              id: proposal.id,
+              confirmTests: confirmTests[proposal.id] === true,
+            })
             await reload(detail.id)
           })
         }
@@ -3877,6 +3926,17 @@ Keep in mind
                 ? t('plan.phaseMetaNone')
                 : fill2(t('plan.phaseMeta'), { deps: deps.join(', '), n: (target.acceptance ?? []).length }),
             ),
+            target.result !== undefined
+              ? h(
+                  'div',
+                  { className: 'tplan-phase-meta' },
+                  fill2(t('plan.phaseResult'), { summary: target.result.summary }),
+                  ` [${statusText(t, target.result.verification, RESULT_VERIFICATION_LABEL)}]`,
+                  (target.result.tests ?? []).length === 0
+                    ? ''
+                    : ` · ${fill2(t('plan.testsCount'), { n: (target.result.tests ?? []).length })}`,
+                )
+              : null,
             h(
               'div',
               { className: 'tplan-actions' },
@@ -3952,26 +4012,91 @@ Keep in mind
           return blocks
         }
 
-        function renderProposals() {
+        function renderProposal(proposal, project) {
+          const actions = h(
+            'div',
+            { className: 'tplan-row' },
+            h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) }, t('plan.apply')),
+            h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) }, t('plan.reject')),
+          )
+          if (proposal.kind !== 'phase-result') {
+            return h('div', { key: proposal.id, className: 'tplan-listline' }, `${proposal.kind} · ${proposal.reason || ''}`, actions)
+          }
+          const phase = (project.phases ?? []).find((entry) => entry.pid === proposal.phaseId)
+          const result = proposal.result ?? {}
+          const tests = Array.isArray(result.tests) ? result.tests : []
+          const verification = result.verification ?? 'claimed'
+          const completed = Array.isArray(result.completed) ? result.completed : []
+          const files = Array.isArray(result.files) ? result.files : []
+          return h(
+            'div',
+            { key: proposal.id, className: 'tplan-preview' },
+            h(
+              'div',
+              { className: 'tplan-sec-head' },
+              `${t('plan.proposals.resultTitle')}${phase === undefined ? '' : ` · ${phase.number} ${phase.title}`}`,
+            ),
+            h('div', { className: 'tplan-goal' }, result.summary || ''),
+            completed.length === 0 ? null : h('div', { className: 'tplan-listline' }, `${t('plan.completed')}: ${completed.join('；')}`),
+            files.length === 0 ? null : h('div', { className: 'tplan-listline' }, `${t('plan.files')}: ${files.join('；')}`),
+            tests.length === 0
+              ? h('div', { className: 'tplan-listline' }, `${t('plan.proposals.tests')}: ${t('plan.none')}`)
+              : h(
+                  'div',
+                  null,
+                  h('div', { className: 'tplan-listline' }, `${t('plan.proposals.tests')} (${tests.length})`),
+                  ...tests.slice(0, 10).map((test, index) => {
+                    const command = [...String(test.command || '—')]
+                    const label = command.length > 120 ? `${command.slice(0, 120).join('')}…` : command.join('')
+                    return h(
+                      'div',
+                      { key: `test-${index}`, className: 'tplan-listline' },
+                      `- ${label} · ${test.status} · ${statusText(t, test.verification, TEST_VERIFICATION_LABEL)}`,
+                    )
+                  }),
+                  tests.length > 10
+                    ? h('div', { className: 'tplan-listline' }, fill2(t('plan.proposals.moreTests'), { n: tests.length - 10 }))
+                    : null,
+                ),
+            h(
+              'div',
+              { className: 'tplan-hint' },
+              `${t('plan.proposals.evidence')}: ${statusText(t, verification, RESULT_VERIFICATION_LABEL)}`,
+              proposal.suggestedStatus === undefined || proposal.suggestedStatus === null
+                ? ''
+                : ` · ${t('plan.proposals.suggestStatus')}: ${statusText(t, proposal.suggestedStatus, PLAN_STATUS_LABEL)}`,
+              ` · ${fill2(t('plan.proposals.baseVersion'), { n: proposal.baseVersion })}`,
+            ),
+            proposal.reason === '' || proposal.reason === undefined
+              ? null
+              : h('div', { className: 'tplan-hint' }, proposal.reason),
+            tests.length === 0
+              ? null
+              : h(
+                  'label',
+                  { className: 'tplan-check' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: confirmTests[proposal.id] === true,
+                    onChange: (event) => {
+                      const checked = event.target.checked
+                      setConfirmTests((current) => ({ ...current, [proposal.id]: checked }))
+                    },
+                  }),
+                  t('plan.proposals.confirmTests'),
+                ),
+            actions,
+          )
+        }
+
+        function renderProposals(project) {
           const pending = proposals.filter((item) => item.status !== 'applied' && item.status !== 'rejected')
           if (pending.length === 0) return null
           return h(
             'div',
             { className: 'tplan-section', key: 'proposals' },
             h('div', { className: 'tplan-sec-head' }, `${t('plan.proposals')} (${pending.length})`),
-            ...pending.map((proposal) =>
-              h(
-                'div',
-                { key: proposal.id, className: 'tplan-listline' },
-                `${proposal.kind} · ${proposal.reason || ''}`,
-                h(
-                  'div',
-                  { className: 'tplan-row' },
-                  h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => applyProposal(proposal) }, t('plan.apply')),
-                  h('button', { type: 'button', className: 'tplan-action', disabled: busy, onClick: () => rejectProposal(proposal) }, t('plan.reject')),
-                ),
-              ),
-            ),
+            ...pending.map((proposal) => renderProposal(proposal, project)),
           )
         }
 
@@ -4069,7 +4194,7 @@ Keep in mind
               form !== null && form.mode === 'add' ? renderPhaseForm() : null,
             ),
             ...renderProjectsSections(project),
-            renderProposals(),
+            renderProposals(project),
             renderChanges(),
           ]
         }

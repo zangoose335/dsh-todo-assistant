@@ -20,10 +20,12 @@ import {
   assembleCapture,
   labelOf,
   mintId,
+  normalizePhaseResultInput,
   normalizeTouchedPath,
   projectFull,
   renderPhaseContextText,
 } from './domain.js'
+import { collectTestEvidence, mergeResultEvidence } from './evidence.js'
 import { extractTodoBlocks } from './marker.js'
 
 /** Wire name of the tool. */
@@ -1069,6 +1071,183 @@ export function createTodoPlanContextTool({ defineTool, store }) {
       }
       const phaseId = typeof args?.phaseId === 'string' ? args.phaseId.trim() : ''
       return { shape: 'context', pack: store.planContext(record.id, phaseId === '' ? undefined : phaseId) }
+    },
+  })
+}
+
+/**
+ * `todo_plan_propose` — record a phase-result proposal (PLAN.md §C1).
+ *
+ * The tool only writes a proposal: the project, its phase and its status are
+ * untouched until the developer applies it in the Plan page. Test commands the
+ * session actually ran are matched against the AI's claims; only those become
+ * `tool-result` evidence, and the result cannot reach `verified` without it.
+ *
+ * @param options - injected dependencies.
+ * @param options.defineTool - `defineTool` from `@deepseek-ai/dsh-tools`.
+ * @param options.store - the todo store (proposals included).
+ * @param options.now - clock override (tests).
+ * @returns the `todo_plan_propose` definition.
+ */
+export function createTodoPlanProposeTool({ defineTool, store, now = Date.now }) {
+  return defineTool({
+    name: 'todo_plan_propose',
+    description: [
+      'Propose a phase result for a project plan: what was actually done, files, test commands and outcomes, issues, risks, changed decisions, and an optional suggested status.',
+      'It only records a proposal. It never changes the plan or marks a phase done; show the result and the per-test evidence level to the developer and let them apply or reject it in the Plan page.',
+      'Do not claim completion on your own. Test commands you report are checked against tools this session actually ran; only real tool results count as evidence, everything else stays an AI claim.',
+    ].join(' '),
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Project id (pj_…).' },
+      phaseId: { type: 'string', required: true, description: 'Phase pid (ph_…) the result belongs to.' },
+      baseVersion: { type: 'integer', required: true, description: 'The project version you read; a stale version is rejected.' },
+      result: {
+        type: 'object',
+        required: true,
+        additionalProperties: false,
+        description: 'The phase result. Keep it structured; do not paste conversation text.',
+        properties: {
+          summary: { type: 'string', required: true, description: 'What was actually done, in one short paragraph.' },
+          completed: { type: 'array', items: { type: 'string' }, description: 'Completed items.' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Files actually changed.' },
+          tests: {
+            type: 'array',
+            description: 'Test commands and their claimed outcomes; real tool results override these.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                command: { type: 'string' },
+                status: { type: 'string', enum: ['passed', 'failed', 'not-run'] },
+              },
+            },
+          },
+          issues: { type: 'array', items: { type: 'string' } },
+          risks: { type: 'array', items: { type: 'string' } },
+          decisionsChanged: { type: 'array', items: { type: 'string' } },
+          planDelta: { type: 'string', description: 'How the plan itself changed, if at all.' },
+          sourceIds: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      status: {
+        type: 'string',
+        enum: ['pending', 'active', 'blocked', 'done', 'dropped'],
+        description: 'Optional suggested phase status; it only takes effect if the developer applies the proposal.',
+      },
+      reason: { type: 'string', description: 'Why this result is proposed now.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          shape: { type: 'string', required: true, enum: ['proposal'] },
+          proposalId: { type: 'string', required: true },
+          projectId: { type: 'string', required: true },
+          phaseId: { type: 'string', required: true },
+          projectName: { type: 'string' },
+          phaseNumber: { type: 'string' },
+          phaseTitle: { type: 'string' },
+          baseVersion: { type: 'integer' },
+          currentVersion: { type: 'integer' },
+          verification: { type: 'string' },
+          suggestedStatus: { type: 'string' },
+          reason: { type: 'string' },
+          result: { type: 'json' },
+          tests: { type: 'json' },
+        },
+      },
+      render: (_args, value) => {
+        const lines = [
+          `Proposal ${value.proposalId} for ${value.projectName ?? value.projectId} · phase ${value.phaseNumber ?? ''} ${value.phaseTitle ?? ''}`,
+          `Evidence: ${value.verification ?? 'claimed'}${value.suggestedStatus === undefined || value.suggestedStatus === '' ? '' : ` · suggested status: ${value.suggestedStatus}`}`,
+          `Result: ${value.result?.summary ?? ''}`,
+        ]
+        const tests = Array.isArray(value.tests) ? value.tests : []
+        if (tests.length === 0) lines.push('Tests: (none reported)')
+        else {
+          lines.push('Tests:')
+          for (const test of tests) {
+            lines.push(`- ${test.command || '(command not recorded)'} — ${test.status} (${test.verification})`)
+          }
+        }
+        if (typeof value.reason === 'string' && value.reason !== '') lines.push(`Why: ${value.reason}`)
+        lines.push('Nothing has changed yet. Ask the developer to apply or reject it in the Plan page.')
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    async execute(args, exec) {
+      const projectId = typeof args?.projectId === 'string' ? args.projectId.trim() : ''
+      if (projectId === '') throw new TodoInputError('plan/project-required', 'projectId 不能为空')
+      const phaseId = typeof args?.phaseId === 'string' ? args.phaseId.trim() : ''
+      if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'phaseId 不能为空')
+      const record = store.findProject(projectId)
+      if (record === undefined) {
+        throw new TodoInputError('plan/not-found', `no project ${projectId} (pass the pj_ id)`)
+      }
+      const project = store.getProject(record.id)
+      if (!Number.isInteger(args?.baseVersion) || args.baseVersion < 1) {
+        throw new TodoInputError('plan/base-version-required', 'baseVersion 必须是正整数（先读 todo_plan_read）')
+      }
+      if (args.baseVersion !== project.version) {
+        throw new TodoInputError(
+          'plan/stale',
+          `计划已是第 ${project.version} 版（你读的是第 ${args.baseVersion} 版）；先重新读取 todo_plan_read 再提议`,
+        )
+      }
+      const phase = (project.phases ?? []).find((entry) => entry.pid === phaseId)
+      if (phase === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${phaseId} 不存在`)
+      const at = now()
+      const claimed = normalizePhaseResultInput(args?.result, at)
+      // An AI claim is never evidence: force its own tests to ai-claim before
+      // matching them against what the session actually ran.
+      const sanitized = {
+        ...claimed,
+        tests: claimed.tests.map((test) => ({ ...test, verification: 'ai-claim' })),
+        verification: 'claimed',
+      }
+      const events = typeof exec?.agent?.session?.snapshotEvents === 'function' ? exec.agent.session.snapshotEvents() : []
+      const observed = collectTestEvidence(events)
+      const lastUserSeq = events.reduce(
+        (max, event) => (event?.type === 'user/message' && Number.isInteger(event.seq) && event.seq > max ? event.seq : max),
+        0,
+      )
+      const appended = collectTestEvidence(events.filter((event) => Number.isInteger(event?.seq) && event.seq > lastUserSeq))
+      const merged = mergeResultEvidence(sanitized, observed, { at, append: appended })
+      const proposal = await store.addProposal(
+        {
+          projectId: record.id,
+          baseVersion: args.baseVersion,
+          kind: 'phase-result',
+          phaseId,
+          result: merged,
+          ...(typeof args?.status === 'string' && args.status !== '' ? { status: args.status } : {}),
+          reason: typeof args?.reason === 'string' ? args.reason : '',
+          proposedBySession:
+            typeof exec?.agent?.session?.id === 'string'
+              ? exec.agent.session.id
+              : typeof exec?.agent?.id === 'string'
+                ? exec.agent.id
+                : '',
+        },
+        at,
+      )
+      return {
+        shape: 'proposal',
+        proposalId: proposal.id,
+        projectId: record.id,
+        phaseId,
+        projectName: project.name,
+        phaseNumber: phase.number,
+        phaseTitle: phase.title,
+        baseVersion: proposal.baseVersion,
+        currentVersion: project.version,
+        verification: proposal.result?.verification ?? 'claimed',
+        ...(proposal.suggestedStatus === undefined ? {} : { suggestedStatus: proposal.suggestedStatus }),
+        reason: proposal.reason,
+        result: proposal.result,
+        tests: proposal.result?.tests ?? [],
+      }
     },
   })
 }

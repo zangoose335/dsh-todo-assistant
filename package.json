@@ -31,6 +31,7 @@
     "host.js",
     "domain.js",
     "brief.js",
+    "evidence.js",
     "plan-markdown.js",
     "plan-export.js",
     "api.js",

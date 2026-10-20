@@ -11,11 +11,13 @@
  *   result   `{ ok: true, value }` or `{ ok: false, error: { code, message, details } }`
  */
 import { BRIEF_BASES } from './brief.js'
+import { confirmTestEvidence } from './evidence.js'
 import { importPreviewToProjectInput, parsePlanMarkdown, renderPlanMarkdown } from './plan-markdown.js'
 import {
   CHANGE_KINDS,
   INBOX,
   NOTE_KINDS,
+  PHASE_STATUSES,
   PLAN_LIMITS,
   PROPOSAL_KINDS,
   PROPOSAL_STATUSES,
@@ -30,6 +32,7 @@ import {
   mintId,
   mintPlanId,
   movePhaseInProject,
+  normalizePhaseResultInput,
   projectFull,
   projectL0,
   projectPlanFull,
@@ -774,11 +777,11 @@ export function createStore(domain, options = {}) {
     },
 
     /**
-     * Record a `project-patch` proposal. The patch is dry-run against the current
-     * project first, so a proposal that could never apply is never stored; the
-     * project itself is not touched. C3's `todo_plan_propose` tool will call this.
+     * Record one pending proposal. `project-patch` is dry-run against the current
+     * project; `phase-result` validates the phase, result and optional target
+     * status. The project itself is never touched here.
      *
-     * @param input - `{ projectId, baseVersion, kind?, patch, reason?, proposedBySession? }`.
+     * @param input - `{ projectId, baseVersion, kind?, patch?, phaseId?, result?, status?, reason?, proposedBySession? }`.
      * @param at - write timestamp.
      * @returns the stored proposal.
      */
@@ -786,31 +789,55 @@ export function createStore(domain, options = {}) {
       const projectId = typeof input?.projectId === 'string' ? input.projectId.trim() : ''
       const project = requireProject(projectsTable.get(projectId))
       if (!Number.isInteger(input?.baseVersion) || input.baseVersion < 1) {
-        throw new TodoInputError('plan/base-version-required', 'baseVersion 必须是正整数（先读 plan.detail）')
+        throw new TodoInputError('plan/base-version-required', 'baseVersion 必须是正整数（先读 plan/detail 或 todo_plan_read）')
       }
       const kind = input?.kind === undefined ? 'project-patch' : input.kind
       if (!PROPOSAL_KINDS.includes(kind)) {
         throw new TodoInputError('plan/invalid-kind', `kind 必须是 ${PROPOSAL_KINDS.join(' / ')}`)
-      }
-      // Validates the patch against the current project without writing anything.
-      applyProjectPatch(project, input?.patch, at, { limits })
-      if (store.proposalCount(projectId) >= limits.proposals) {
-        throw new TodoInputError('plan/proposal-limit', `提议已达上限 ${limits.proposals} 条`)
-      }
-      if (store.proposalCount(projectId, 'pending') >= limits.pendingProposals) {
-        throw new TodoInputError('plan/pending-proposal-limit', `待处理提议已达上限 ${limits.pendingProposals} 条；先应用或拒绝`)
       }
       const proposal = {
         id: mintPlanId('pp', (id) => proposalsTable.get(id) !== undefined),
         projectId,
         baseVersion: input.baseVersion,
         kind,
-        patch: { ...input.patch },
         reason: planReason(input?.reason, limits.proposalReason),
         proposedBySession:
           typeof input?.proposedBySession === 'string' ? input.proposedBySession.trim().slice(0, 256) : '',
         status: 'pending',
         createdAt: at,
+      }
+      if (kind === 'project-patch') {
+        if (input?.patch === null || input.patch === undefined || typeof input.patch !== 'object' || Array.isArray(input.patch)) {
+          throw new TodoInputError('plan/invalid-patch', 'project-patch 提议必须带 patch')
+        }
+        // Validates the patch against the current project without writing anything.
+        applyProjectPatch(project, input.patch, at, { limits })
+        proposal.patch = { ...input.patch }
+      } else {
+        const phaseId = typeof input?.phaseId === 'string' ? input.phaseId.trim() : ''
+        if (phaseId === '') throw new TodoInputError('plan/phase-id-required', 'phase-result 提议必须带 phaseId')
+        const phase = (project.phases ?? []).find((entry) => entry.pid === phaseId)
+        if (phase === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${phaseId} 不存在`)
+        proposal.phaseId = phaseId
+        proposal.result = normalizePhaseResultInput(input?.result, at, { limits })
+        if (input?.status !== undefined) {
+          if (!PHASE_STATUSES.includes(input.status)) {
+            throw new TodoInputError('plan/invalid-phase-status', `status 必须是 ${PHASE_STATUSES.join(' / ')}`)
+          }
+          if (input.status === 'split') {
+            throw new TodoInputError('plan/phase-status-split', 'split 只能通过拆分产生')
+          }
+          if (phase.status === 'split') {
+            throw new TodoInputError('plan/phase-is-split', `阶段 ${phase.number} 已拆分；状态由子阶段体现`)
+          }
+          proposal.suggestedStatus = input.status
+        }
+      }
+      if (store.proposalCount(projectId) >= limits.proposals) {
+        throw new TodoInputError('plan/proposal-limit', `提议已达上限 ${limits.proposals} 条`)
+      }
+      if (store.proposalCount(projectId, 'pending') >= limits.pendingProposals) {
+        throw new TodoInputError('plan/pending-proposal-limit', `待处理提议已达上限 ${limits.pendingProposals} 条；先应用或拒绝`)
       }
       await proposalsTable.put(proposal.id, proposal)
       return proposal
@@ -818,13 +845,16 @@ export function createStore(domain, options = {}) {
 
     /**
      * Apply a pending proposal: version + change, then mark it applied. A stale
-     * `baseVersion` rejects before anything is written.
+     * `baseVersion` rejects before anything is written. For a `phase-result`
+     * proposal, `confirmTests` is the developer's explicit "I checked the tests"
+     * and upgrades tests without tool evidence to `developer`.
      *
      * @param id - proposal id.
      * @param at - write timestamp.
+     * @param options - `confirmTests` (phase-result only).
      * @returns the stored project, the change, and the updated proposal.
      */
-    async applyProposal(id, at) {
+    async applyProposal(id, at, options = {}) {
       const proposal = requireProposal(proposalsTable.get(id))
       if (proposal.status !== 'pending') {
         throw new TodoInputError('plan/proposal-not-pending', `提议状态是 ${proposal.status}，只有 pending 可以应用`)
@@ -833,16 +863,51 @@ export function createStore(domain, options = {}) {
       if (proposal.baseVersion !== project.version) {
         throw new TodoInputError(
           'plan/stale',
-          `提议基于版本 ${proposal.baseVersion}，计划已是 ${project.version}；请重新读取 plan.detail 后重新提议`,
+          `提议基于版本 ${proposal.baseVersion}，计划已是 ${project.version}；请重新读取 plan/detail 后重新提议`,
         )
       }
-      const { project: updated, change } = await store.applyChange(project.id, proposal.patch, {
-        at,
-        by: 'proposal',
-        baseVersion: proposal.baseVersion,
-        reason: proposal.reason,
-        sourceIds: [],
+      if (proposal.kind !== 'phase-result') {
+        const { project: updated, change } = await store.applyChange(project.id, proposal.patch, {
+          at,
+          by: 'proposal',
+          baseVersion: proposal.baseVersion,
+          reason: proposal.reason,
+          sourceIds: [],
+        })
+        const applied = { ...proposal, status: 'applied', appliedAt: at }
+        await proposalsTable.put(id, applied)
+        return { project: updated, change, proposal: applied }
+      }
+
+      const phases = project.phases ?? []
+      const phase = phases.find((entry) => entry.pid === proposal.phaseId)
+      if (phase === undefined) throw new TodoInputError('plan/phase-not-found', `阶段 ${proposal.phaseId} 不存在`)
+      const result = options.confirmTests === true ? confirmTestEvidence(proposal.result) : proposal.result
+      if (result === null || typeof result !== 'object') {
+        throw new TodoInputError('plan/invalid-result', '提议没有可应用的结果')
+      }
+      const nextPhases = phases.map((entry) => {
+        if (entry.pid !== proposal.phaseId) return entry
+        return {
+          ...entry,
+          result,
+          ...(proposal.suggestedStatus === undefined ? {} : { status: proposal.suggestedStatus }),
+          updatedAt: at,
+        }
       })
+      const { project: updated, change } = await store.applyChange(
+        project.id,
+        { phases: nextPhases },
+        {
+          at,
+          by: 'proposal',
+          baseVersion: proposal.baseVersion,
+          kind: 'phase-result',
+          affectedPhaseIds: [proposal.phaseId],
+          reason: proposal.reason,
+          sourceIds: [],
+        },
+      )
       const applied = { ...proposal, status: 'applied', appliedAt: at }
       await proposalsTable.put(id, applied)
       return { project: updated, change, proposal: applied }
@@ -1149,7 +1214,9 @@ export function createApi({ store, now = Date.now, hitIds, resolveRoot, resolveS
     /** Apply a pending proposal; a stale `baseVersion` rejects before writing. */
     async 'plan.proposal.apply'(payload) {
       const id = resolveProposal(store, payload)
-      const { project, change, proposal } = await store.applyProposal(id, now())
+      const { project, change, proposal } = await store.applyProposal(id, now(), {
+        confirmTests: payload?.confirmTests === true,
+      })
       return { item: store.projectRow(project), proposal, ...(change === undefined ? {} : { change }) }
     },
 

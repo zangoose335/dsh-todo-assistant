@@ -32,6 +32,7 @@ import {
   createTodoListTool,
   createTodoNoteTool,
   createTodoPlanContextTool,
+  createTodoPlanProposeTool,
   createTodoPlanReadTool,
   createTodoReadTool,
   createTodoRecallTool,
@@ -217,6 +218,7 @@ export async function apply(ctx) {
     createTodoListTool({ defineTool, store, resolveWorkspace }),
     createTodoPlanReadTool({ defineTool, store, resolveWorkspace }),
     createTodoPlanContextTool({ defineTool, store }),
+    createTodoPlanProposeTool({ defineTool, store }),
     createTodoRecallTool({ defineTool, store, recall }),
     createTodoStatusTool({ defineTool, store }),
   ]
