@@ -570,6 +570,8 @@ AI:  [todo_add: 只填本待办相关字段]
   切到别的工作区会自动跟过去，切回来时之前的选择还在
 - **通用规则**：面板里一块可折叠的编辑区，按工作区保存（`rules` 表）；「新会话中立即执行」时
   把该卡工作区的规则拼进种子
+- **第二个 tab（Stage 4，B5）**：在同一 slot 上新增 `todo-assistant-plan`（右栏“计划”），与卡片 tab 并列；
+  卡片 tab 的视图、筛选、拖拽和写入不变。计划 tab 的布局与操作见 §13.6
 
 ---
 
@@ -584,6 +586,7 @@ AI:  [todo_add: 只填本待办相关字段]
 | M5 | 新开会话 / 插入当前会话 | ✅ |
 | M6 | `todo_recall` 目录 + 分页回读 | 可砍 |
 | M7 | 去重合并 | 可砍 |
+| S4 | Project Plan（B1–B5）：计划/阶段/导入导出/上下文包/计划 tab | ✅ 已完成（2026-10-20） |
 
 M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真正省 token。
 
@@ -697,7 +700,70 @@ M1 就能交付"看得见、能改、能存"的待办区；M2 之后才开始真
 > 测试：`verify-domain` 262/262、`verify-brief` 118/118、`verify-recall` 35/35、`verify-gate1` 63/63、`verify-legacy` 11/11，`git diff --check` 通过。
 > 真实 UI S1–S10、真实 `todo_recall` 轨迹、旧插件 UI（副本/测试工作区）、存储副本和场景 10 已验证；细节见
 > `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE2-REVIEW.md`、`docs/GATE3-REVIEW.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md`。
-> 限制：旧插件/存储写回使用副本，未对真实 `~/.dsh` 做破坏性演练；S9 需明确指向 #6.25；S2 约束重复、S7 略多。Stage 4 未实现。
+> 限制：旧插件/存储写回使用副本，未对真实 `~/.dsh` 做破坏性演练；S9 需明确指向 #6.25；S2 约束重复、S7 略多。
+
+> **Stage 4 的 B1–B5 已完成（2026-10-20）**：Project Plan 三表与阶段模型、Markdown 导入导出与确认、阶段上下文包与只读工具、第二个“计划”页签。
+> 测试：`verify-plan` 73/73、`verify-phase` 66/66、`verify-import` 67/67、`verify-context` 46/46、`verify-client` 12/12，连同原有 5 个脚本共 **753** 项通过；计划页手工验收见 `docs/B5-ACCEPTANCE.md`。
+> C1–C4（结果证据分级、diff、提议/确认/历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
+
+## 13. Project Plan（Stage 4，B1–B5）
+
+> **状态（2026-10-20）：B1–B5 已完成。** C1–C4、D1–D3、E2–E4 仍未实现。
+
+### 13.1 范围与不变量
+
+- 计划与阶段是独立数据，**不是卡片步骤**；卡片只能通过可选的 `projectId`/`phaseId` 做弱关联。
+- `DOMAIN_VERSION` 保持 1：JSON single-layout 严格匹配版本，加表靠“缺表读为空”；卡片新增字段全部 optional。
+- 所有计划写操作走 `applyChange`：版本 +1、追加 `plan_changes`、超限拒绝；没有绕过它的写入路径。
+- 首版不做 AI 静默写：阶段写接口给开发者和计划页；AI 只有只读工具；提议/确认在 C。
+
+### 13.2 数据模型
+
+三张表：`projects`、`plan_proposals`、`plan_changes`（旧文件没有它们时读为空表）。
+
+- **ProjectPlan**：`id/workspace/name/goal/status/currentPhaseId/phases/decisions/risks/sources/version/createdAt/updatedAt/origin`。
+- **Phase**：`pid/number/parentPid/title/goal/status/dependsOn/acceptance/mustKeep/decisions/sources/nextStep/notes/result/createdAt/updatedAt`。
+- **PhaseResult / TestEvidence**：`summary/completed/files/tests/issues/risks/decisionsChanged/planDelta/sourceIds/verification(默认 claimed)/recordedAt/recordedBySession`；测试证据含 `command/status(passed|failed|not-run)/verification(tool-result|developer|ai-claim)/sourceId/at`。
+- **plan_proposals**：`id/projectId/baseVersion/kind('project-patch')/patch/reason/proposedBySession/status/createdAt/appliedAt/rejectedAt/rejectedReason`；patch 只能改项目级字段。
+- **plan_changes**：`id/projectId/version/at/by/kind/reason/affectedPhaseIds/diff/sourceIds`；`create` 存完整初始结构，后续只存顶层字段 before/after。
+- change kind：`create/patch/phase-add/phase-update/phase-remove/phase-split/phase-move/phase-status/phase-result`（只增不减，旧记录仍可读）。
+
+### 13.3 阶段校验与状态
+
+- `pid` 唯一；`number` 非空且项目内唯一；`dependsOn` 与 `parentPid` 必须存在、不能自指、不能成环；`currentPhaseId` 必须存在。
+- 拆分保留父阶段（状态变 `split`），子阶段继承验收/必须保留/决策/来源，`dependsOn` 至少包含父阶段；数字父级生成 `4a…`，字母父级生成 `A1…`。
+- 删除仍被依赖的阶段或有子阶段的阶段会拒绝；删除当前阶段会清空 `currentPhaseId`。
+- 状态端点只接受 `pending/active/blocked/done/dropped`；`split` 只能由拆分产生；`done` 不强制已有结果（C1 在提议侧收紧）。
+- 记录结果不改变状态；结果可替换，每次替换都记一条 change。
+
+### 13.4 API 与只读工具
+
+- 项目：`plan.list/detail/create/patch/remove`；阶段：`plan.phase.add/update/remove/split/move/status/result`；提议：`plan.proposal.list/apply/reject`；历史与导出：`plan.change.list`、`plan.export`；导入：`plan.import.preview/commit`；交接：`plan.context`。
+- `plan.export` 默认返回 JSON 快照；`format:'markdown'` 返回文本；再给 `write:true` 时写入项目工作区并返回路径（不覆盖同名文件，收件箱拒绝）。
+- AI 侧只读工具：`todo_plan_read`（项目/阶段/依赖/验收/结果）和 `todo_plan_context`（阶段交接）。
+- 提议的 `baseVersion` 与项目当前版本不一致时返回 `plan/stale`；应用后版本 +1、追加历史、提议标记 applied。
+
+### 13.5 Markdown 导入/导出（B3）
+
+- 最小语法：`# 项目名` + 首段；`## Phase 4: 标题` / `### Phase 4a: 标题`；阶段内 `Goal/Acceptance/Depends on/Context/Decisions/Risks/Next/Result`（中英标签、半/全角冒号，支持 `A`、`B2` 编号）。代码围栏忽略。
+- 预览不写存储；依赖绑定与自动编号列在 `inferred`，未确认不能保存；无法解析的依赖/父级始终拒绝；未归类内容只显示、不保存。
+- 导出与导入结构等价（名称、目标、项目决策/风险、阶段的编号/标题/父子/依赖/验收/必须保留/决策/下一步/结果摘要）；测试证据明细不在 Markdown 中。
+
+### 13.6 计划页（B5）
+
+- 第二个 `sidebarRightTabs` 类型 `todo-assistant-plan`，slot key 同名，`priority:'extension'`，guide 中与卡片页并列；卡片页的类型、key、视图和写入都不变。
+- 页面：项目列表（待处理提议角标）→ 项目详情（目标、当前阶段、阶段树、阶段操作、项目决策/风险/来源、待处理提议、变更历史）→ 导入面板（预览/确认/保存）→ 导出按钮。
+- 阶段操作：开始阶段（新会话 + 交接文本，会话打开后把阶段标为进行中）、插入交接（只预填输入框）、编辑（编号/标题/目标/下一步/依赖/验收/必须保留）、拆分（一行一个标题）、改状态、记录结果。
+- 4 秒静默轮询仅在页签可见时运行；错误显示在页内，不白屏。
+- 手工验收记录（A–E 路线图、导入/拆分/当前阶段/开始阶段/插入/导出/卡片页回归）见 `docs/B5-ACCEPTANCE.md`。
+
+### 13.7 已知限制
+
+- 计划页暂无“提出修改”（C 才有提议功能）、删除项目、阶段重编号和拖拽排序（D/E）。
+- 交接文本约 4000 字上限；超限会截断次要来源并提示 `todo_plan_read`。
+- 旧版本写回会丢掉 `projects`/`plan_proposals`/`plan_changes` 三张表（single-layout 只序列化自己声明的表）；升级前备份。
+
+---
 
 > **与文档的已知偏差**（均为记录过的取舍，不是遗漏）：
 > 1. §7 的三路检测信号只实现"触及文件"；符号与 commit **已决定不做**（见 §7 的实现说明）；

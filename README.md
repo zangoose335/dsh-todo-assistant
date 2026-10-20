@@ -13,6 +13,8 @@ Todo Assistant 让你先把这件事记下来。AI
 
 它不只是记录"还有什么没做"，也帮助保留"为什么要做、之前已经知道什么、下一步该做什么"。
 
+右侧栏还有一个“计划”页：把 Markdown 计划导入成项目和阶段，按阶段查看依赖、验收和执行结果，并从某个阶段直接开始新会话或插入交接材料。
+
 ## 适合哪些场景？
 
 ### 发现 Bug，但暂时不修
@@ -60,9 +62,9 @@ DSH。也可以从本地仓库安装，或按需固定到某个 Git commit。安
 
 ### 2. 在右侧栏打开插件
 
-在右侧栏点击 `+`，选择 **Todo Assistant**。
+在右侧栏点击 `+`，选择 **Todo Assistant**（卡片）或 **计划**（项目计划）。
 
-卡片按工作区查看；不属于任何工作区的卡只在
+“计划”页默认跟随当前会话的工作区，也可以切到全部工作区或收件箱。卡片按工作区查看；不属于任何工作区的卡只在
 「全部工作区」视图里可见。侧栏提供未完成、待修复、待添加、已完成和全部等视图。
 
 ### 3. 记录一项旁支任务
@@ -135,6 +137,19 @@ confirmed/constraints，也不会把 `mustRead` 自动升级为已验证。
 卡片也支持追加
 note，以记录新证据、进度或补充事实，而不是悄悄覆盖原始记录。
 
+## 项目计划（Project Plan）
+
+右侧栏的第二个入口“计划”用来放跨会话的项目计划；它和“待办”页并存，互不影响。
+
+-   **项目列表**：项目名、目标、状态、当前阶段、阶段数和待处理提议数。
+-   **导入 Markdown**：粘贴一份计划，先解析成预览：识别出的阶段、需要你确认的推断（依赖绑定、自动编号）、没认出来的段落（不会保存）。确认后再保存；有推断但没确认时保存会被拒绝。
+-   **阶段**：支持阶段与子阶段、依赖、验收、必须保留的上下文、决策、相关文件、状态和执行结果；可以新增、编辑、拆分、删除（被其他阶段依赖或有子阶段时会拒绝）、改状态、记录结果、设当前阶段。
+-   **阶段交接**：“开始阶段”为该阶段开一个新会话，开场包含项目目标、阶段目标/下一步、直接前置阶段的实际结果、决策、验收、风险、未解决项、来源指针和工作区规则；“插入交接”只把同一份材料写进当前输入框，不自动发送。材料只带指针，不带历史或文档正文；超过约 4000 字时保留关键项，并提示用 `todo_plan_read` 补看。
+-   **导出**：把当前计划导出为 Markdown，写进项目所在工作区的文件夹；文件名取项目名，重名自动加 `-2`，不覆盖同名文件。收件箱里的计划需要先放进一个工作区。
+-   **只读工具**：AI 可以用 `todo_plan_read` 查看项目/阶段/依赖/验收/结果，用 `todo_plan_context` 生成阶段交接；两者都不会改计划。
+
+最小 Markdown 语法：`# 项目名` 加首段作为总体目标；`## Phase 4: 标题` 为阶段，`### Phase 4a: 标题` 为子阶段（也接受 `A`、`B2` 这类编号）；阶段内用 `Goal:/目标:`、`Acceptance:/验收:`、`Depends on:/依赖:`、`Context:/上下文:`、`Decisions:/决策:`、`Risks:/风险:`、`Next:/下一步:`、`Result:/结果:` 加条目。代码围栏会被忽略，认不出的内容只出现在预览里，不会写进计划。
+
 ## 上下文读取与提醒
 
 ### 分层读取
@@ -162,6 +177,7 @@ AI：如果本轮产生了值得保留的新证据，可以通过 note 追加到
 -   短编号，例如 `#3.2`，便于在对话中引用卡片；
 -   `#` 引用选择器：正常会话中候选按当前会话所属工作区筛选；缺少会话 ID 时退回查询全部工作区；
 -   每个工作区独立的通用规则，并在插件创建新会话时带入；
+-   计划页：项目列表、阶段树、依赖/验收、导入导出、阶段交接，与卡片页并存；
 -   卡片状态、补充记录和原始上下文回读工具。
 
 ## 当前阶段与限制
@@ -183,9 +199,11 @@ AI：如果本轮产生了值得保留的新证据，可以通过 note 追加到
 
 **范围限制：** 旧插件 UI 和存储写回使用副本/测试工作区，未对真实 `~/.dsh` 做破坏性升级/降级；S9 需要用户明确指向 #6.25；S2 约束有重复、S7 比最简多两个字段。真实 UI 十场景、真实 `todo_recall`、旧插件 UI、存储副本和场景 10 均已验证。
 
-当前未实现 Project Plan、计划持续维护、卡片步骤和 Markdown 导入导出；Stage 3 的 brief-first 新会话和插入简报已完成。卡片拖拽只插入可见引用（如 `#6.24「…」`），完整正文通过三个操作按钮插入，不做拖拽后自动展开上下文。
-升级前建议先备份 `~/.dsh/storages/todo_assistant.json`；旧版本 schema 会 strip 掉 `brief` 和 `sources`，
-不要用旧版本写回新数据。
+**Stage 4（B1–B5）验证（2026-10-20）：** `verify-plan` 73/73、`verify-phase` 66/66、`verify-import` 67/67、`verify-context` 46/46、`verify-client` 12/12，加上原有 5 个脚本共 **753** 项全部通过，`git diff --check` 通过。计划页手工验收记录见 [`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md)。
+
+Stage 4 的 B1–B5 已完成（2026-10-20）：Project Plan 数据模型与三张表、阶段/依赖/验收/状态/执行结果、确定性 Markdown 导入与确认、阶段上下文包与只读工具、计划页（第二个右栏入口）和导出到工作区文件夹。计划页已由开发者手工走通导入、拆分、当前阶段、开始阶段、插入交接和导出；普通卡片页未改动。
+
+仍**未实现**：C1–C4（执行证据分级、diff、提议/确认/历史）、D1–D3（卡片/阶段拖拽交接）、E2–E4（卡片步骤与编号）。计划页暂不提供“提出修改”和删除项目；Markdown 往返不保留测试证据明细；旧版本写回会丢掉 `brief`/`sources`，也会丢掉 `projects`/`plan_proposals`/`plan_changes` 三张表，升级前请备份 `~/.dsh/storages/todo_assistant.json`。卡片拖拽仍只插入可见引用（如 `#6.24「…」`），完整正文通过三个操作按钮插入。
 
 ## 安装方式
 
@@ -213,9 +231,9 @@ plugin_manager install_bundle  target = https://github.com/zangoose335/dsh-todo-
 位于 PATH 中。
 
 安装或更新 Host 侧代码后，重启 DSH 以加载插件。只修改 `client.js`
-时通常刷新页面即可。
+时通常刷新页面即可；“计划”页依赖 Host 侧的新接口，更新后请先完整重启 DSH，再刷新页面。
 
-安装后，在右侧栏点击 `+`，选择 **Todo Assistant**。
+安装后，在右侧栏点击 `+`，选择 **Todo Assistant**（卡片）或 **计划**（项目计划）。
 
 ## 开发与设计
 
@@ -223,7 +241,12 @@ plugin_manager install_bundle  target = https://github.com/zangoose335/dsh-todo-
 Host/Client 通信等实现细节，请阅读：
 
 -   [`docs/DESIGN.md`](docs/DESIGN.md)：设计原则与实现决策
--   [`scripts/verify-domain.mjs`](scripts/verify-domain.mjs)：无头验证脚本
+-   [`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md)：计划页与 A–E 路线图的验收记录
+-   [`scripts/verify-domain.mjs`](scripts/verify-domain.mjs)：卡片/存储/回读的无头验证
+-   [`scripts/verify-plan.mjs`](scripts/verify-plan.mjs)、[`scripts/verify-phase.mjs`](scripts/verify-phase.mjs)：计划与阶段
+-   [`scripts/verify-import.mjs`](scripts/verify-import.mjs)、[`scripts/verify-context.mjs`](scripts/verify-context.mjs)：导入导出与交接
+-   [`scripts/verify-client.mjs`](scripts/verify-client.mjs)：浏览器端页签注册冒烟
+-   [`scripts/fixtures/plan-a-e.md`](scripts/fixtures/plan-a-e.md)：A–E 路线图导入样例
 
 ## 许可
 

@@ -18,6 +18,10 @@ bring it into a new session or the current composer.
 It is not just a list of things left to do. It helps preserve **why a
 task matters, what is already known, and what to do next**.
 
+The right sidebar also has a **Plan** page: import a Markdown plan into
+projects and phases, review dependencies, acceptance and recorded results,
+and start a new session or insert a handoff from one phase.
+
 ## When is it useful?
 
 ### You spot a bug but can't fix it now
@@ -79,9 +83,11 @@ from a local checkout or pin a Git commit. See
 
 ### 2. Open the sidebar
 
-In the right sidebar, click `+` and select **Todo Assistant**.
+In the right sidebar, click `+` and select **Todo Assistant** (cards) or
+**Plan** (project plans).
 
-Cards are viewed by workspace; cards that belong to no workspace are
+The Plan page follows the current session's workspace by default, and can
+switch to all workspaces or the inbox. Cards are viewed by workspace; cards that belong to no workspace are
 visible only in the **All workspaces** view. The sidebar includes
 Unfinished, To fix, To add, Done, and All views.
 
@@ -173,6 +179,43 @@ the card complete. The status is updated only after you confirm.
 You can also append notes to preserve new evidence, progress, or facts
 without silently rewriting the original card.
 
+## Project Plan
+
+The second right-sidebar entry, **Plan**, holds project plans that span
+sessions. It sits beside the card page and does not change it.
+
+-   **Project list**: name, goal, status, current phase, phase count and
+    pending proposals.
+-   **Markdown import**: paste a plan and inspect a preview first — recognized
+    phases, inferences that need confirmation (dependency bindings, generated
+    numbers), and content that could not be classified (never saved). Saving is
+    rejected while inferences are unconfirmed.
+-   **Phases**: phases and sub-phases, dependencies, acceptance, must-keep
+    context, decisions, sources, status and execution results. You can add,
+    edit, split, remove (rejected while others depend on it or it has
+    children), change status, record a result, and set the current phase.
+-   **Phase handoff**: "Start phase" opens a new session whose opening text
+    carries the project goal, the phase goal/next step, the actual results of
+    its direct prerequisite phases, decisions, acceptance, risks, unresolved
+    items, source pointers and workspace rules. "Insert handoff" only writes
+    the same material into the composer; it never sends. Sources stay pointers:
+    no history or document bodies. Text is kept around 4,000 characters and
+    points at `todo_plan_read` when something is dropped.
+-   **Export**: write the current plan as Markdown into the project's own
+    workspace folder. The file is named after the project, and an existing file
+    is never overwritten (`-2`, `-3`, …). An inbox plan has no folder; move it
+    to a workspace first.
+-   **Read-only tools**: `todo_plan_read` shows a project/phases/dependencies/
+    acceptance/results, and `todo_plan_context` builds a phase handoff. Neither
+    changes a plan.
+
+Minimal Markdown syntax: `# Project name` plus the first paragraph as the goal;
+`## Phase 4: title` for a phase and `### Phase 4a: title` for a sub-phase
+(`A` and `B2` style numbers are accepted too). Inside a phase, add items under
+`Goal:`, `Acceptance:`, `Depends on:`, `Context:`, `Decisions:`, `Risks:`,
+`Next:` and `Result:` (the Chinese labels work as well). Fenced code is ignored,
+and unclassified lines stay in the preview only.
+
 ## Context retrieval and reminders
 
 ### Layered retrieval
@@ -213,6 +256,8 @@ AI to add useful new evidence to a card when appropriate.
     current session's workspace; when the session ID is missing, it falls back
     to querying all workspaces;
 -   Per-workspace rules, included in new sessions created by the plugin;
+-   a Plan page with the project list, phase tree, dependencies/acceptance,
+    import/export and phase handoff, beside the card page;
 -   Tools for reading cards, appending notes, updating status, listing
     tasks, and retrieving original-session excerpts.
 
@@ -236,8 +281,27 @@ See `docs/GATE1-T5-ACCEPTANCE.md`.
 
 **Scope limits:** the old-plugin UI and storage write-back were exercised on a copy/test workspace, not a destructive drill on the real `~/.dsh`; S9 needs an explicit pointer to #6.25; S2 has a duplicate constraint and S7 is slightly above minimal. The real UI ten scenarios, real `todo_recall`, old-plugin UI, storage copy, and scenario 10 are verified.
 
-Project Plan, plan maintenance, card steps, and Markdown import/export are not implemented; brief-first handoff seeds (Stage 3) are complete. Dragging a card inserts only its visible reference (e.g. `#6.24「…」`); full context is inserted with the three action buttons, not expanded on drop. Full history retrieval/authorization is not implemented. Back up `~/.dsh/storages/todo_assistant.json` before upgrading; an older
-schema strips `brief` and `sources`, so do not write new data back with an old version.
+**Stage 4 (B1–B5) evidence (2026-10-20):** `verify-plan` 73/73,
+`verify-phase` 66/66, `verify-import` 67/67, `verify-context` 46/46,
+`verify-client` 12/12 — **753** checks in total together with the original five
+scripts, and `git diff --check` passes. The manual plan-page record is in
+[`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md).
+
+Stage 4's B1–B5 are complete (2026-10-20): the Project Plan model and its three
+tables, phases/dependencies/acceptance/status/results, deterministic Markdown
+import with confirmation, the phase context pack and read-only tools, the Plan
+page (a second right-sidebar entry), and export into the workspace folder. The
+developer walked the Plan page through import, split, current phase, start
+phase, insert handoff and export by hand; the card page was not changed.
+
+Still **not implemented**: C1–C4 (evidence grading, diffs, proposals/confirm/
+history), D1–D3 (card/phase drag handoff), and E2–E4 (card steps and numbering).
+The Plan page has no "propose a change" or project deletion yet; a Markdown
+round-trip does not keep test-evidence details; an older version writes back
+without `brief`/`sources` and drops the `projects`/`plan_proposals`/
+`plan_changes` tables — back up `~/.dsh/storages/todo_assistant.json` before
+upgrading. Dragging a card still inserts only its visible reference (e.g.
+`#6.24「…」`); full context is inserted with the three action buttons.
 
 ## Installation
 
@@ -266,10 +330,12 @@ If published to npm in the future, it can also be installed by package
 name and version. `install_bundle` requires `pnpm` on PATH.
 
 Restart DSH after installing or updating Host-side code. Changes limited
-to `client.js` usually only require a page refresh.
+to `client.js` usually only require a page refresh; the Plan page depends on
+new host endpoints, so restart DSH fully and then refresh the page after
+updating.
 
 After installation, open the right sidebar's `+` menu and select **Todo
-Assistant**.
+Assistant** (cards) or **Plan** (project plans).
 
 ## Development and design
 
@@ -280,8 +346,19 @@ see:
 
 -   [`docs/DESIGN.md`](docs/DESIGN.md): design principles and
     implementation decisions
--   [`scripts/verify-domain.mjs`](scripts/verify-domain.mjs): headless
-    verification script
+-   [`docs/B5-ACCEPTANCE.md`](docs/B5-ACCEPTANCE.md): plan page and A–E
+    roadmap acceptance record
+-   [`scripts/verify-domain.mjs`](scripts/verify-domain.mjs): headless card/
+    storage/recall verification
+-   [`scripts/verify-plan.mjs`](scripts/verify-plan.mjs) and
+    [`scripts/verify-phase.mjs`](scripts/verify-phase.mjs): plans and phases
+-   [`scripts/verify-import.mjs`](scripts/verify-import.mjs) and
+    [`scripts/verify-context.mjs`](scripts/verify-context.mjs): import/export
+    and handoff
+-   [`scripts/verify-client.mjs`](scripts/verify-client.mjs): browser tab
+    registration smoke test
+-   [`scripts/fixtures/plan-a-e.md`](scripts/fixtures/plan-a-e.md): A–E roadmap
+    import fixture
 
 ## License
 

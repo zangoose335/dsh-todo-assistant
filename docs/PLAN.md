@@ -2,10 +2,10 @@
 
 > **仓库**：`zangoose335/dsh-todo-assistant`，基线提交 `be8ebf4`（`docs: fix inbox wording and note multiple markers per reply`）。
 > **本次范围**：基于现有 `docs/PLAN.md` 修订开发计划；本次仅修改本文件，未修改源码、测试、README、`docs/DESIGN.md`，未提交，未实现任何功能。
-> **基线验证**：已运行 `node scripts/verify-domain.mjs`，结果 **184/184**；`git status` 干净。`docs/DESIGN.md:621-631` 记录的 109/145/181 项已过时，需在文档任务里更正。
-> **核心结论**：当前实现是“卡片式旁支任务工作台 + 单范围（origin.seqRange）原文回读”，卡片已有 `core`/`mustRead`/`park`，但**没有结构化任务简报，也没有卡片质量门禁**；Project Plan、计划持续维护、Markdown 导入、拖拽插入、卡片步骤编号均未实现。本次修订把“从当前上下文提炼必要情报并创建高质量待办”定为 Stage 1 / MVP；历史补全、交接、Project Plan 与导入均为后续阶段。README 的部分措辞需要先修正。
+> **基线验证（2026-10-20）**：`node scripts/verify-domain.mjs` **262/262**；Stage 4 完成后全部 10 个脚本共 **753** 项通过（明细见 §8.1）；`git diff --check` 通过。
+> **核心结论（历史：计划修订时的现状）**：当时实现是“卡片式旁支任务工作台 + 单范围（origin.seqRange）原文回读”，卡片已有 `core`/`mustRead`/`park`，但**没有结构化任务简报，也没有卡片质量门禁**；Project Plan、计划持续维护、Markdown 导入、拖拽插入、卡片步骤编号均未实现。本次修订把“从当前上下文提炼必要情报并创建高质量待办”定为 Stage 1 / MVP；历史补全、交接、Project Plan 与导入均为后续阶段。README 的部分措辞需要先修正。
 >
-> **当前状态（2026-10-19）**：上面是计划修订时的现状；现在 Stage 1–3 和 Gate 1/2/3 已完成，Stage 4（Project Plan、持续维护、卡片步骤、拖拽、Markdown 导入）仍未实现。
+> **当前状态（2026-10-20）**：Stage 1–3 与 Gate 1/2/3 已完成；Stage 4 的 B1–B5（Project Plan 数据/阶段/导入导出/上下文包/计划 tab）已完成并通过自动回归 + 计划页手工验收。C1–C4（结果证据、diff、提议/确认/历史）、D1–D3（拖拽交接）、E2–E4（卡片步骤/编号）仍未实现。
 
 ---
 
@@ -862,14 +862,21 @@ graph TD
 | T4 数据兼容 | 基础实现 + 真实旧代码探针；旧插件 UI 未验证 | version-1 fixture、brief 持久化、close/reopen、旧 schema strip/写回模拟；另外用 `be8ebf4` 真实旧代码验证 `brief` 与 `sources` 会被 strip/写回丢失；**仍不是旧插件在真实 UI 中运行** |
 | T5 / Gate 1 | **通过（PASS，带范围限制）** | 确定性 S1–S10 39/39（加契约/持久化共 63/63）；修正后隔离语义探针 10/10 通过；真实 UI、`todo_recall`、旧插件 UI、存储副本和场景 10 均已验证；详见 `docs/GATE1-T5-ACCEPTANCE.md`、`docs/GATE1-RUNTIME-ACCEPTANCE.md` |
 
-验证基线（源码 `2839fe9` + 本次未提交的验收改动）：
+验证基线（2026-10-20，B1–B5 完成；源码 `2839fe9` + 之后未提交的改动）：
 
-- `node scripts/verify-brief.mjs` → **118/118**
 - `node scripts/verify-domain.mjs` → **262/262**
+- `node scripts/verify-brief.mjs` → **118/118**
 - `node scripts/verify-recall.mjs` → **35/35**
 - `node scripts/verify-gate1.mjs` → **63/63**（S1–S10 39 项 + 契约/持久化 24 项）
 - `node scripts/verify-legacy.mjs` → **11/11**（真实旧代码 `be8ebf4`）
+- `node scripts/verify-plan.mjs` → **73/73**
+- `node scripts/verify-phase.mjs` → **66/66**
+- `node scripts/verify-import.mjs` → **67/67**（含 A–E 路线图、写文件不覆盖）
+- `node scripts/verify-context.mjs` → **46/46**
+- `node scripts/verify-client.mjs` → **12/12**（第二个页签注册冒烟）
 - `git diff --check` → **通过**
+
+合计 **753** 项；计划页的导入、拆分、当前阶段、开始阶段、插入交接和导出已由开发者手工验收（`docs/B5-ACCEPTANCE.md`）。
 
 运行时时序：2026-10-19 严格复核时 `todo_add` 描述为 **3641** 字符（sha256 `66ca102c…`）；统一 blocking 语义并补 back-reference 规则后为 **6456** 字符（sha256 `83de5a20…`）。S3/S4/S5/S6/S9 已复跑通过；真实运行验收已在 `docs/GATE1-RUNTIME-ACCEPTANCE.md` 补齐。
 
@@ -1126,6 +1133,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 #### B1 Project Plan 数据模型、存储与 API 投影
 
+> **状态（2026-10-20）：完成。** `projects`/`plan_proposals`/`plan_changes` 三表、project/phase/result/evidence 与 proposal/change schema、`plan.*` 投影与 CRUD、统一 `applyChange`、级联删除与导出已落地；`DOMAIN_VERSION` 保持 1，version-1 旧 fixture 可开，普通卡不变。新增 `scripts/verify-plan.mjs` **73/73**；`scripts/verify-domain.mjs` 的五表断言已同步。
+
 - **目标与原因**：引入项目计划容器，记录项目目标、阶段、子任务、依赖、当前阶段、项目级决策、风险、参考文档、执行结果与变更历史，同时保持普通卡片轻量。
 - **当前问题**：只有 `todos`/`rules` 表；没有项目/阶段；`DOMAIN_VERSION=1`，single layout 不能随便升版本。
 - **实施方向**：
@@ -1145,6 +1154,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - **风险与兼容性**：`scripts/verify-domain.mjs:103` 表断言需更新；single layout 版本严格；项目记录大小；表名/ID 必须匹配 `[a-z][a-z0-9_]*`/`[a-zA-Z0-9_-]+`。
 
 #### B2 阶段、子阶段、依赖、验收、状态与执行结果
+
+> **状态（2026-10-20）：完成。** pid/展示号唯一、依赖与父子存在/自指/环、`currentPhaseId` 存在性校验已落地；`plan.phase.add/update/remove/split/move/status/result` 全部走 `applyChange` 并记录 change kind；拆分支持 4→4a… 与 A→A1… 两种编号；删除被依赖/有子阶段的阶段会拒绝，删除当前阶段会清空 current。新增 `scripts/verify-phase.mjs` **66/66**。
 
 - **目标与原因**：阶段至少支持目标、下一步、前置依赖、验收标准、必须保留的上下文、关键决策、相关来源、执行状态、实际执行结果；支持 `4 → 4a/4b/4c` 拆分；明确阶段不是卡片步骤。
 - **当前问题**：没有阶段模型；没有依赖/验收/结果；没有 `pid`/`number` 分离。
@@ -1166,9 +1177,11 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - **测试要求**：阶段 CRUD、拆分、依赖环/悬空、展示号重复、状态转换、结果记录、durability、旧 fixture 回归。
 - **风险与兼容性**：阶段数组大小；依赖图性能（阶段数上限）；拆分的 numbering 语义；状态/结果并发写用 `table.update`。
 
-#### B3 Markdown 导入/导出、预览与确认（Stage 4，非当前 MVP）
+#### B3 Markdown 导入/导出、预览与确认
 
-> **优先级调整**：本任务不属于当前 MVP，也不属于 Stage 1-3。基础待办创建、必要历史补全和卡片交接质量达到验收标准后，才启动本任务。届时优先做确定性 Markdown 解析器；AI 辅助导入是可选项，两者都不是当前阶段必须完成的内容。
+> **状态（2026-10-20）：完成（确定性解析器；无 AI 辅助导入、无 UI）。** 新增 `plan-markdown.js`（解析/渲染）与 `plan.import.preview`/`plan.import.commit`：推断的依赖绑定与自动编号必须确认，未解析依赖直接拒绝；`plan.export` 增加 `format:'markdown'`（默认仍为 JSON），`write:true` 写入项目工作区且不覆盖。新增 `scripts/verify-import.mjs` **67/67**（含 A–E 路线图与写文件）；计划页的导入/导出 UI 在 B5。
+
+> **优先级调整（历史）**：本任务当时不属于 MVP，也不属于 Stage 1-3；基础待办创建、必要历史补全和卡片交接质量达到验收标准后才启动。实际在 B2 之后按确定性解析器完成（2026-10-20）；AI 辅助导入未做。
 
 - **目标与原因**：让开发者提供 Markdown/文本计划，解析成结构化预览，确认后保存；第一版只做单向导入/导出，不做双向同步。
 - **当前问题**：没有解析器/预览/导出；AI 若直接写计划会违反“不能静默改写”。
@@ -1196,6 +1209,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 #### B4 阶段上下文包与新会话/输入框交接
 
+> **状态（2026-10-20）：完成（数据/API/只读工具；界面按钮在 B5）。** `plan.context` 与 `todo_plan_context` 返回结构化 pack 和文本：项目/阶段目标、直接前置阶段结果（未记录会明写）、项目+阶段决策、验收、风险、未解决项、三层来源指针（封顶 12）、工作区规则、待处理提议；文本超过约 4000 字时按优先级截断并提示用 `todo_plan_read` 补。新增 `scripts/verify-context.mjs` **46/46**。client 的本地化交接文本与按钮由 B5 接入。
+
 - **目标与原因**：开始一个阶段时生成专属上下文包，让新会话理解项目目标、阶段目标、前置阶段实际结果、关键决策、验收、风险、文档/历史来源和下一步；不能只给阶段名。
 - **当前问题**：`buildSeed` 只处理卡片；没有项目/阶段；插入当前会话只有一句提示。
 - **实施方向**：
@@ -1216,6 +1231,8 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - **风险与兼容性**：client bundle 不能相对导入 host builder，可能出现两套文本；用同一字段清单+测试锁定；文本过长；workspace 不存在；历史正文不进入包。
 
 #### B5 计划 tab UI 与真实大型计划验收
+
+> **状态（2026-10-20）：完成。** 右栏新增第二个“计划”入口，与卡片页并存：项目列表/详情、阶段树、当前阶段、阶段编辑与拆分、状态、结果记录、开始阶段（新会话）、插入交接、Markdown 导入/导出到工作区、待处理提议、变更历史。A–E 路线图已由开发者手工走通导入、拆分、当前阶段、开始阶段、插入交接、导出和卡片页回归；新增 `scripts/verify-client.mjs` **12/12**。详见 `docs/B5-ACCEPTANCE.md`。
 
 - **目标与原因**：提供一个最小可用的项目计划 UI，并与现有卡片 tab 共存；用真实大型开发计划验收。
 - **当前问题**：只有卡片 tab；没有项目列表/详情/阶段操作/导入导出/proposal 面板。
@@ -1530,12 +1547,14 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 
 **完成条件**：
 - P0-E1/D0：编号/拖拽调查结论（不阻塞 Stage 1-3）。
-- B1/B2/B4/B5：Project Plan、阶段/依赖/验收、阶段上下文包、计划 tab；在 Gate 1/2/3 后启动。
-- **B3（Markdown 导入/导出）**：排在 B2 之后，且必须等 Gate 1/2/3；届时优先确定性解析器，AI 辅助导入可选；**当前 MVP 不实现**。
-- C1-C4：持续维护、diff、确认/历史。
-- E2-E4：卡片步骤/编号；D1-D3：拖拽交接。
-- 所有 Stage 4 功能不得反向阻塞 Stage 1-3；回归 184 + Gate 1-3 测试。
+- B1/B2/B4/B5：Project Plan、阶段/依赖/验收、阶段上下文包、计划 tab；在 Gate 1/2/3 后启动。**已完成（2026-10-20）。**
+- **B3（Markdown 导入/导出）**：排在 B2 之后，且必须等 Gate 1/2/3；届时优先确定性解析器，AI 辅助导入可选。**已完成（2026-10-20，确定性解析器；AI 辅助导入未做）。**
+- C1-C4：持续维护、diff、确认/历史。**未实现。**
+- E2-E4：卡片步骤/编号；D1-D3：拖拽交接。**未实现。**
+- 所有 Stage 4 功能不得反向阻塞 Stage 1-3；回归现有 753 项 + Gate 1-3 测试。
 - 文档更新。
+
+> **状态（2026-10-20）**：B1–B5 完成并回归（10 个脚本、753 项）；计划页手工验收通过（`docs/B5-ACCEPTANCE.md`）。C/D/E 仍为后续阶段。
 
 ### Gate Docs：文档与产品承诺
 
@@ -1544,11 +1563,13 @@ Gate 1 UI 冒烟（开发者验证，2026-10-19；不属于本仓库自动化覆
 - DESIGN 更新新模型、MVP 范围、测试计数、已知偏差。
 - 每个 Gate 完成后同步对应文档，而不是最后一次性补。
 
-> **Gate Docs 状态（2026-10-19 收口）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险、测试计数和 Gate 1/2/3 结论；Gate 1/2/3 均为**通过（带范围限制）**，Stage 4 未实现。
+> **Gate Docs 状态（2026-10-20 更新）**：README/README.en、DESIGN、PLAN 已同步 TaskBrief 契约、旧卡派生限制、降级风险、测试计数和 Gate 1/2/3 结论；Gate 1/2/3 均为**通过（带范围限制）**。Stage 4 的 B1–B5 已完成，README/PLAN/DESIGN 已同步计划页、导入导出、阶段交接、753 项验证和 `docs/B5-ACCEPTANCE.md`；C/D/E 仍未实现。
 
 ---
 
 ## 7. README 修正任务
+
+> **状态（2026-10-20）**：本节是 Stage 1 前记录的文档修正任务清单，其中“尚未支持/后续”的多数能力已在 Stage 1–4 的 B1–B5 中落地。这里保留作为历史依据；当前真实能力以 README、§8.1 与 `docs/B5-ACCEPTANCE.md` 为准。
 
 > 本次不修改；以下为单独文档任务。批准后由 F1/F2 执行。
 
@@ -1656,7 +1677,7 @@ T5 必须优先验证：
 | A4（Stage 2） | sourceIds/where、冲突/替代、旧记录、不触发额外 recall | 同上 |
 | A5（Stage 2） | observed/stated、文档路径、种子文本、路径归一化、无 fs 降级 | 同上/纯函数 |
 | A6（Stage 2） | 历史功能 10 项 + Token 10 场景 + **累计成本指标**（消息/事件/字符/索引 vs 正文/批次/重复读取/当前足够时是否读取/简报是否足够避免复研） | 同上 + 行为探针 |
-| B1-B5（Stage 4） | Project Plan/阶段/上下文包/计划 tab；**B3 Markdown 导入最后做** | `scripts/verify-plan.mjs`（建议） |
+| B1-B5（Stage 4） | Project Plan/阶段/上下文包/计划 tab/Markdown 导入导出；2026-10-20 全部完成 | `verify-plan.mjs` 73/73、`verify-phase.mjs` 66/66、`verify-import.mjs` 67/67、`verify-context.mjs` 46/46、`verify-client.mjs` 12/12；手工记录见 `docs/B5-ACCEPTANCE.md` |
 | C1-C4（Stage 4） | 结果/证据、diff、proposal/apply/history、版本 | 同上 |
 | E2-E3（Stage 4） | 步骤模型/CRUD/重排/种子；拖拽冲突 | `scripts/verify-domain.mjs` + 手工 |
 | D1-D2（Stage 4） | payload/插入文本纯函数、缺失 id、长文本 | 纯函数 + 手工 |
@@ -1678,16 +1699,17 @@ T5 必须优先验证：
 - 从简单/复杂卡片分别开新会话：新会话是否能直接说出做什么/为什么/约束/下一步；是否重复调查；是否误把路径当事实；是否要求额外历史。
 - 插入当前输入框：是否只预填、不发送、不建卡；简报是否足够；简单卡是否保持轻量。
 
-**Stage 4（扩展，后续）**
-- B5 真实计划；C3 proposal/apply/history；D1/D2 拖拽；E3 步骤。它们不影响 Gate 1 判定。
+**Stage 4（扩展）**
+- B1–B5 已完成（2026-10-20）：Project Plan、阶段/依赖/验收/结果、Markdown 导入导出、阶段上下文包、计划 tab 与 A–E 路线图手工验收。
+- 仍未实现：C3 proposal/apply/history、D1/D2 拖拽、E3 步骤；它们不影响 Gate 1 判定。
 
 ### 8.3 测试数据
 
 - **TaskBrief fixtures**：简单任务（goal+next）、复杂任务（多约束/线索/open）、推断/未知混合、冲突决定、source-only（必须失败）、旧卡无 brief。
 - version-1 旧卡 fixture（无 request/rootSessionId、有 mustRead.where.file）。
 - 8 个有效轮次的 fake session log（Stage 2：合成 user/空轮/工具/当前轮/压缩）。
-- Markdown 计划 fixture（Stage 4，不用于 Gate 1）。
-- 真实大型计划：本路线图裁剪版（Stage 4）。
+- Markdown 计划 fixture：`scripts/fixtures/plan.md`（小样例）与 `scripts/fixtures/plan-a-e.md`（A–E 路线图裁剪版，B5 手工验收使用）。
+- 真实大型计划：已用 A–E 路线图裁剪版完成导入、拆分、依赖、当前阶段和交接验收（`docs/B5-ACCEPTANCE.md`）。
 - 交接场景：简单/复杂卡、文档失效/冲突、无历史可见的新会话（Stage 3）。
 
 ## 9. 风险、兼容性与假设
@@ -1702,7 +1724,7 @@ T5 必须优先验证：
 ### 9.1 存储与迁移
 
 - **已确认风险**：`DOMAIN_VERSION` 从 1 升 2 会让 single-layout 旧文件 `version-mismatch` 直接打不开。**当前阶段保持 1，优先新增 optional 字段/表**；但不要写成“永远不能升版本”。
-- `scripts/verify-domain.mjs:103` 的表断言必须更新；否则测试会误报。
+- `scripts/verify-domain.mjs` 的表断言已更新为五张表（todos/rules/projects/plan_proposals/plan_changes）；以后新增表时要同步。
 - 旧卡没有 `request`/`rootSessionId`/`sources`/`steps`；所有新字段必须 optional/default；旧卡不能批量改写。
 - 降级/未知字段：旧版本插件读新记录时 zod object 可能 strip 新字段，后续写入会丢新字段；需要实测并记录“升级后不要降级写”；若不可接受，迁移方案需处理。
 - **未来不兼容变更**：先设计并验证迁移（备份旧文件 → 读取/转换 → 写新版本 → 回滚验证），再决定升版本；没有迁移方案不升。
@@ -1782,6 +1804,8 @@ T5 必须优先验证：
 ---
 
 ## 附：建议的最小提交顺序（批准后）
+
+> **状态（2026-10-20）**：第 17–21 项（B1–B5）已完成；C1–C4、D1–D3、E2–E4 仍未实现。
 
 > 顺序按 Stage 1 → Stage 2 → Stage 3 → Stage 4。Stage 1 未过 Gate 1 前，不建议合并 A/B/C/D/E 的产品实现。文档/README 可并行，但不得提前宣称未实现能力。
 
